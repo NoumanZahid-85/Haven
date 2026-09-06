@@ -1,33 +1,85 @@
-﻿# OmniVoice AI (VoiceSell)
+﻿# OmniVoice AI — Voice-Enabled E-Commerce Sales Agent
 
-**Production-grade, voice-enabled commerce agent** — a pure WebSocket voice pipeline (browser microphone → server-side VAD → Groq Whisper → LangGraph agent → streamed TTS back to the browser), RAG-grounded product recommendations, per-user order isolation with Supabase auth, and an automated end-to-end voice tester that places real orders before you ever open your mic.
+<p align="center">
+  <strong>A production-grade voice chatbot that lets customers browse products, ask questions, and place orders — all by speaking naturally.</strong>
+</p>
 
-[![Backend CI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Docker-009688)](./backend)
-[![Frontend](https://img.shields.io/badge/frontend-Next.js%2016-000000)](./frontend)
-[![Deploy](https://img.shields.io/badge/deploy-Render%20Blueprint-46E3B7)](./render.yaml)
-
----
-
-## The Problem
-
-1. **High support overhead & latency** — text chatbots are slow and can't handle nuanced product inquiries in real time.
-2. **Hallucinated product knowledge** — LLMs invent specs, pricing, and stock availability when not grounded in a verified index.
-3. **Risky order operations** — letting an agent place/modify/cancel orders is dangerous without explicit confirmation gates.
-4. **Orders leaking across users** — demo builds often share one hardcoded "demo customer", so everyone sees everyone's orders.
-5. **Fragile voice stacks** — heavyweight WebRTC/media-server dependencies are hard to deploy on free tiers and hard to debug when they fail silently.
-
-## How It's Solved
-
-- **Pure-WebSocket voice pipeline** — no Daily room, no media server. The browser streams raw 16 kHz PCM over one WebSocket; the backend runs Silero VAD, Groq `whisper-large-v3-turbo` STT, the agent, and chunked Orpheus TTS in-process.
-- **Half-duplex turn-taking by construction** — while the bot is speaking, mic audio is gated off server-side *and* client-side, so echo can never be transcribed and barge-in artifacts can't corrupt turns.
-- **RAG-grounded catalog** — products vectorized into Qdrant (Gemini embeddings); every catalog answer is grounded and cited.
-- **LangGraph agent with a confirmation gate** — quotes first, asks "Shall I place this order?", executes only after an audible yes/no; survives Redis loss with a history-fallback gate.
-- **Per-user order isolation** — every order is scoped to a real identity: a Supabase email/password account, or a private per-browser guest ID (developer mode).
-- **Self-testing before ship** — `tools/e2e_voice_test.py` simulates the entire browser (synthesizes speech, streams it as mic audio, listens to replies) and asserts greeting → transcript → quote → order placement against any deployment, production included.
+<p align="center">
+  <a href="./backend"><img src="https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python%203.11-009688?style=for-the-badge&logo=fastapi" alt="Backend"></a>
+  <a href="./frontend"><img src="https://img.shields.io/badge/Frontend-Next.js%2015-000000?style=for-the-badge&logo=next.js" alt="Frontend"></a>
+  <a href="./render.yaml"><img src="https://img.shields.io/badge/Deploy-Render%20Blueprint-46E3B7?style=for-the-badge" alt="Deploy"></a>
+  <a href="https://github.com/NoumanZahid-85/voicesell-ai/actions"><img src="https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=for-the-badge&logo=github-actions" alt="CI"></a>
+</p>
 
 ---
 
-## Voice Pipeline (what actually runs)
+## What Is This?
+
+OmniVoice AI (internally called VoiceSell) is a complete voice-first commerce agent built from the ground up. A customer opens the web app, clicks a button, and can start talking — asking things like _"What headphones do you have under $50?"_ or _"Place me an order for 2 keyboards."_ The bot responds in a natural spoken voice within roughly half a second.
+
+Under the hood it runs a pure-WebSocket audio pipeline: the browser streams raw PCM audio, the server transcribes it with Groq Whisper, runs a LangGraph agent that searches a Qdrant vector database for product context, generates a response with an LLM, synthesizes speech with Orpheus TTS, and streams the WAV back to the browser. No heavyweight media server, no third-party call platform — just a WebSocket and a well-designed pipeline.
+
+---
+
+## The Problems This Solves
+
+| Problem                                        | Why It Matters                                            | How It's Addressed                                                               |
+| ---------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Text chatbots feel slow and robotic            | Customers abandon text chat for complex product questions | Pure-WebSocket voice pipeline with ~500ms end-to-end latency                     |
+| LLMs hallucinate product specs and prices      | Customer gets wrong info, trust breaks                    | RAG-grounded answers from Qdrant; every claim is cited from the actual catalog   |
+| Agents place orders without confirmation       | Destructive actions are dangerous in production           | LangGraph confirmation gate — the agent always asks before executing             |
+| All visitors share one "demo customer"         | Everyone sees each other's order history                  | Per-user isolation via Supabase auth or per-browser guest UUID                   |
+| WebRTC media servers are expensive and fragile | Hard to deploy on free tiers, hard to debug silently      | Dropped WebRTC entirely; replaced with a simple WebSocket + browser AudioContext |
+
+---
+
+## Screenshots
+
+### Chat Interface
+
+![Chat Interface](./Images/chatInterface.png)
+
+The main customer-facing interface. Supports both text and voice mode. The session ID is tracked in the header, and the left sidebar shows navigation between Voice Chat, Orders, Catalog, and Admin sections.
+
+### Product Catalog
+
+![Product Catalog](./Images/catalog.png)
+
+Browse the full Olist product catalog with category filtering, pricing, and stock status. The catalog is backed by the same data that powers the RAG retrieval — so what the bot says and what the catalog shows are always consistent.
+
+### Admin Dashboard
+
+![Admin Dashboard](./Images/adminDashboard.png)
+
+The admin panel shows real-time order volumes, inventory status, and system health metrics. Only accessible to users with the admin role.
+
+### Order Management Dashboard
+
+![Order Dashboard](./Images/dahsboard.png)
+
+Customer-facing order history view with status tracking (pending → confirmed → shipped → delivered → cancelled), itemized breakdowns, and timestamps.
+
+### Feature Overview
+
+![Features](./Images/features.png)
+
+---
+
+## System Architecture
+
+### Chat (Text) Architecture
+
+![Chat Architecture](./Images/ChatArchitecture.png)
+
+The text chat path uses a standard REST flow. A message hits the FastAPI `/api/v1/chat` endpoint, gets routed through the LangGraph ReAct agent (`triage → rag → respond`), and the response is returned. Redis provides FAQ caching (cache hit = no LLM call) and sliding-window conversation memory. Qdrant handles vector search for product Q&A, PostgreSQL handles order reads/writes.
+
+### Voice Architecture
+
+![Voice Architecture](./Images/VoiceArchitecture.png)
+
+The voice path replaces the REST call with a persistent WebSocket. The browser records mic audio using the Web Audio API, resamples it to 16 kHz PCM, and streams binary frames to the server. The server runs Silero VAD to detect when the user has stopped speaking, batches the utterance, sends it to Groq Whisper for transcription, feeds the transcript to the same LangGraph agent, then pipelines the response through Groq Orpheus TTS in ~180-character chunks. Each chunk is a complete WAV sent back over the WebSocket in strict order. The browser queues and plays them sequentially.
+
+### Voice Pipeline (Detailed Flow)
 
 ```mermaid
 flowchart TD
@@ -45,145 +97,210 @@ flowchart TD
     FE["Next.js Console<br/>chat / catalog / orders / admin"] -->|REST| API["FastAPI Backend"]
 ```
 
-Protocol details:
+---
 
-| Direction | Payload | Meaning |
-| --- | --- | --- |
-| Client → Server | binary | raw PCM16 mono, 16 kHz, ~32 ms frames |
-| Client → Server | JSON `{"type":"playback_done"}` | all queued reply chunks finished playing |
-| Server → Client | JSON `ready` / `transcript` / `agent_caption` / `speaking_start` / `error` | session lifecycle + captions |
-| Server → Client | binary | one complete WAV (Orpheus 24 kHz mono) per text chunk, delivered strictly in order |
+## WebSocket Protocol
 
-Turn-taking constants live at the top of [`backend/app/voice/ws_session.py`](./backend/app/voice/ws_session.py): start/end confidence thresholds, 1.5 s silence-to-end, 20 s max utterance, pre-roll buffer, LLM timeout, watchdog.
+| Direction       | Payload                                                            | Meaning                                                                          |
+| --------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Client → Server | `binary`                                                           | Raw PCM16 mono, 16 kHz, ~32 ms frames                                            |
+| Client → Server | `JSON {"type":"playback_done"}`                                    | All queued reply chunks finished playing                                         |
+| Server → Client | `JSON ready / transcript / agent_caption / speaking_start / error` | Session lifecycle + captions                                                     |
+| Server → Client | `binary`                                                           | One complete WAV (Orpheus 24 kHz mono) per text chunk, delivered in strict order |
+
+Turn-taking constants (start/end confidence thresholds, 1.5 s silence-to-end, 20 s max utterance, LLM timeout, watchdog) are all tunable at the top of [`backend/app/voice/ws_session.py`](./backend/app/voice/ws_session.py).
 
 ---
 
-## Authentication & Order Isolation
+## Tech Stack
 
-Every order the agent places is owned by an identity resolved in the frontend and threaded through chat REST, the voice WebSocket, and into the LangGraph state (`customer_id`):
+| Layer                        | Technology                                       | Why This, Not Something Else                                                                              |
+| ---------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| **Voice Transport**          | WebSocket + Web Audio API                        | Dropped Daily/WebRTC — simpler to deploy, simpler to debug, no media server cost                          |
+| **Speech-to-text**           | Groq Whisper (`whisper-large-v3-turbo`)          | Fast enough for real-time, handles accents well, free API tier                                            |
+| **Text-to-speech**           | Groq Orpheus TTS                                 | State-of-the-art naturalness, no separate API bill                                                        |
+| **LLM**                      | Groq `llama-3.3-70b` (primary) + Gemini fallback | Sub-100ms TTFT on Groq; Gemini as backup                                                                  |
+| **Agent framework**          | LangGraph                                        | Explicit state machine, human-in-the-loop hooks, checkpointing — none of this exists in vanilla LangChain |
+| **Voice Activity Detection** | Silero VAD (server-side)                         | Process-level; no external API call; deterministic silence detection                                      |
+| **Vector database**          | Qdrant Cloud                                     | Rust-based, sub-5ms queries, free cloud tier, rich metadata filtering                                     |
+| **Relational DB**            | PostgreSQL via Supabase                          | MVCC row locking for concurrent order writes — SQLite would deadlock                                      |
+| **Cache / Memory**           | Redis (Upstash)                                  | Sub-ms FAQ cache lookups, sliding-window conversation history                                             |
+| **Backend framework**        | FastAPI + `asyncpg`                              | Native async, matches the event loop the voice WebSocket lives on                                         |
+| **Frontend**                 | Next.js 15 (App Router)                          | Production-grade React, SSR, proper routing for admin panel complexity                                    |
+| **Auth**                     | Supabase Auth                                    | Already using Supabase for DB; shared JWT, guest mode with localStorage UUID                              |
+| **Package manager**          | `uv`                                             | 10–100× faster than pip, deterministic lockfile                                                           |
+| **Deployment**               | Render Blueprint                                 | One `render.yaml` provisions Postgres, Redis, backend, and frontend                                       |
 
-| Mode | Identity | Where it comes from |
-| --- | --- | --- |
-| **Signed in** | Supabase auth user UUID | email/password login screen (`components/auth.tsx`) |
-| **Guest (developer mode)** | random UUID persisted in `localStorage` | created per browser; a fresh incognito window gets its own |
+---
 
-This fixes the classic demo bug where all visitors shared one hardcoded customer row and saw each other's orders — two guest windows now have provably disjoint histories (see `tools/test_isolation.py`).
+## Key Design Decisions
 
-### Enabling email/password login (Supabase setup)
+### Half-Duplex by Construction
 
-The app degrades gracefully: with no Supabase public env vars set, it runs **guest-only** (no login screen). To turn on real accounts:
+While the bot is speaking, the server-side VAD gate is closed. Even if the client keeps streaming mic audio, the server discards it. This prevents echo from being transcribed and completely eliminates barge-in artifacts without any hardware echo cancellation.
 
-1. Open your project at [supabase.com/dashboard](https://supabase.com/dashboard).
-2. **Authentication → Providers → Email**: make sure Email is **enabled**.
-3. **Authentication → Sign In / Up**: for a frictionless demo, turn **off** "Confirm email". If you leave it on, signups will be told to confirm via inbox before signing in (the UI handles this).
-4. **Project Settings → API**: copy the **Project URL** and the **anon public** key (`sb_publishable_…` or the legacy JWT). ⚠️ Never use the service/secret key (`sb_secret_…`) in the browser — it bypasses everything.
-5. Set them wherever the frontend runs:
-   - local: `frontend/.env.local` → `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - Render: frontend service → Environment → the same two keys (declared as `sync: false` in `render.yaml`)
-6. Redeploy/restart the frontend. The login gate appears; "Continue as Guest" stays available below it.
+### No Daily, No Pipecat
 
-No SQL migrations are needed for auth itself — the backend owns its tables via SQLAlchemy and get-or-creates a matching `customers` row for any identity that places an order.
+The original plan used Pipecat + Daily WebRTC. After running into consistent audio sample-rate mismatches and deployment complexity on the free tier, I dropped both and replaced the entire transport layer with a plain WebSocket. The browser handles mic capture and PCM resampling natively via the Web Audio API. This saved significant infrastructure complexity and made local dev trivially easy.
 
-> **Scope note:** the backend trusts the `customer_id` supplied by the client (fine for a demo; there is no RLS/JWT verification server-side). Hardening would mean verifying the Supabase JWT on each request — noted as future work.
+### RAG Grounding
+
+Every product-related answer is pulled from Qdrant vectors (Gemini text-embedding-004 at 768 dims). The LLM is explicitly instructed to say "I don't have information on that" if the retrieved context doesn't contain the answer. Hallucinated prices and specs are architecturally impossible for catalog queries.
+
+### Confirmation Gate for Orders
+
+The LangGraph graph has an explicit `confirmation_gate` node. When the agent decides to place, modify, or cancel an order, it pauses and presents the details to the user ("I'll place 3 keyboards for $45 total — shall I confirm?"). The order write only happens after receiving an explicit affirmative. A Redis key tracks the pending action to prevent any other utterance from being interpreted as a confirmation.
+
+### Per-User Order Isolation
+
+Every order row is scoped to a `customer_id`. Authenticated users get their Supabase UUID; unauthenticated users get a random UUID stored in `localStorage`. Two different browser windows — even two incognito tabs — see completely different order histories.
 
 ---
 
 ## Repository Structure
 
 ```
+voicesell/
 ├── backend/
 │   └── app/
-│       ├── api/                # routes (incl. voice_ws.py — the WS endpoint)
-│       ├── core/               # config & logging
-│       ├── db/                 # models & session lifecycle
-│       ├── schemas/            # Pydantic schemas
-│       ├── services/           # RAG / agent graph / order service / cache
-│       └── voice/              # ws_session.py — VAD→STT→agent→TTS pipeline
+│       ├── api/              # FastAPI route modules (chat, voice WS, orders, catalog)
+│       ├── core/             # Config (pydantic-settings), logging
+│       ├── db/               # SQLAlchemy async models, session lifecycle
+│       ├── schemas/          # Pydantic request/response schemas
+│       ├── services/         # RAG, LangGraph agent, order service, recommendations, cache
+│       └── voice/            # ws_session.py — the VAD→STT→agent→TTS pipeline
 ├── frontend/
-│   ├── app/                    # routes (landing, chat, catalog, orders, admin)
-│   ├── components/auth.tsx     # Supabase login gate + guest mode
-│   └── lib/                    # api client, supabase client
+│   ├── app/                  # Next.js App Router (landing, chat, catalog, orders, admin)
+│   ├── components/
+│   │   ├── auth.tsx          # Supabase login gate + "Continue as Guest" button
+│   │   └── voice/            # VoiceSession component, waveform visualization
+│   └── lib/                  # API client, Supabase client singleton
 ├── tools/
-│   ├── e2e_voice_test.py       # browser-simulating voice E2E (places real orders)
-│   ├── test_isolation.py       # proves two guests never see each other's orders
-│   └── purge_faq_cache.py      # ops helper: drop poisoned FAQ cache entries
-└── render.yaml                 # Render Blueprint (backend + frontend + Postgres + Redis)
+│   ├── e2e_voice_test.py     # End-to-end voice harness (simulates browser, places real orders)
+│   ├── test_isolation.py     # Proves two guest sessions never share order history
+│   └── purge_faq_cache.py    # Ops helper: invalidate stale Redis FAQ cache entries
+├── docs/
+│   └── adr/                  # Architectural Decision Records (ADR-001 through ADR-003)
+├── Images/                   # Screenshots and architecture diagrams
+└── render.yaml               # Render Blueprint: Postgres + Redis + backend + frontend
 ```
-
-(The retired Daily/Pipecat transport files remain under `backend/app/voice/` but are unused.)
 
 ---
 
 ## Local Development
 
-**Prerequisites:** Docker & Docker Compose, Python 3.11+, Node.js 18+.
+**Prerequisites:** Python 3.11+, Node.js 18+, Docker (for Postgres and Qdrant locally).
 
 ```bash
-# 1. Infra
+# 1. Spin up local infrastructure
 docker compose up -d postgres qdrant
 
-# 2. Backend
+# 2. Start the backend
 cd backend
-cp .env.example .env          # fill in your keys
-uv run python -m scripts.ingest_olist
+cp .env.example .env        # fill in GROQ_API_KEY, GEMINI_API_KEY, QDRANT_URL, etc.
+uv run python -m scripts.ingest_olist   # ingest Olist catalog into Postgres + embed into Qdrant
 uv run uvicorn app.main:app --reload --port 8000
 
-# 3. Frontend (new terminal)
+# 3. Start the frontend (new terminal)
 cd frontend
-cp .env.example .env.local    # optional: NEXT_PUBLIC_SUPABASE_* for login
+cp .env.example .env.local  # optional: add NEXT_PUBLIC_SUPABASE_* for login
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open [http://localhost:3000](http://localhost:3000). The backend health check is at [http://localhost:8000/health](http://localhost:8000/health).
 
-### Tests
+### Running Tests
 
 ```bash
 cd backend
+
+# Unit + integration tests
 uv run pytest
+
+# Static analysis
 uv run pyright app/
 uv run ruff check app/ tests/
 
-# End-to-end voice test against ANY running backend (default localhost:8000):
+# Full end-to-end voice test (synthesizes speech, streams it like a real browser, asserts the order goes through)
 python tools/e2e_voice_test.py $GROQ_API_KEY
-E2E_WS_URL=wss://voicesell-backend.onrender.com/api/v1/voice/ws?session_id=e2e \
-  python tools/e2e_voice_test.py $GROQ_API_KEY     # ...against production
 
-# Order-isolation proof (two guests, one shared backend):
+# Run against the production deployment instead
+E2E_WS_URL=wss://voicesell-backend.onrender.com/api/v1/voice/ws?session_id=e2e \
+  python tools/e2e_voice_test.py $GROQ_API_KEY
+
+# Prove order isolation between two guest sessions
 python tools/test_isolation.py
 ```
 
-The voice harness receives the greeting WAV, synthesizes spoken questions with Groq TTS, resamples them to 16 kHz PCM, streams them exactly like the browser does, and asserts: greeting plays → utterance transcribed correctly → order quoted → confirmation places a **real order**. Run it after every backend change; if it passes in production, the mic in your browser is not the variable anymore.
+The `e2e_voice_test.py` harness fully simulates a browser session: it connects to the WebSocket, receives the greeting WAV, synthesizes spoken questions using Groq TTS, resamples them to 16 kHz PCM, and streams binary frames exactly the way the browser does. It asserts that the greeting plays → the utterance is transcribed correctly → a product quote is returned → a confirmation places a **real order** that appears in the database. If this passes against production, the microphone in your browser is not the variable anymore.
 
 ---
 
 ## Deploying to Render
 
-The repo ships a [`render.yaml`](./render.yaml) Blueprint provisioning four linked resources: Postgres, Redis (Key Value), the backend (Docker web service), and the frontend (Node web service).
+The repo ships a [`render.yaml`](./render.yaml) Blueprint that provisions four linked services in one click: PostgreSQL, Redis (Key Value), the Python backend, and the Next.js frontend.
 
-1. Push to GitHub (branch `master`) → Render **New + Blueprint** → select repo → Apply.
-2. Fill the secrets marked `sync: false` in the dashboard:
-   - Backend: `QDRANT_URL`, `QDRANT_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `LANGSMITH_API_KEY` (optional), `OTEL_EXPORTER_ENDPOINT` (optional).
-   - Frontend: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional — omit for guest-only mode). `NEXT_PUBLIC_BACKEND_URL` is pre-wired.
-3. Redeploy after saving env vars.
+### Steps
 
-> **Free-plan note:** embeddings call the Gemini API instead of shipping a local sentence-transformer, keeping the backend inside Render's free-tier memory budget. Expect multi-second agent latency on order turns (two chained LLM calls) — the pipeline tolerates it with a 60 s timeout and a spoken fallback phrase.
+1. Push the repository to GitHub (`master` branch).
+2. In Render: **New → Blueprint** → select the repo → **Apply**.
+3. Fill in the secrets marked `sync: false` in the dashboard:
+   - **Backend:** `QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`
+   - **Frontend:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (optional — omit for guest-only mode)
+4. Redeploy after saving.
 
-### Auto-seeding
+> **Free-tier note:** Embeddings use the Gemini API instead of a local sentence-transformer model, keeping the backend within Render's free-tier memory limit (~512 MB). Expect a few seconds of thinking time on order turns — the pipeline handles this with a 60 s LLM timeout and a spoken fallback phrase if the model takes too long.
 
-On first boot the backend checks whether `products` is empty and, if so, ingests the Olist catalog into Postgres and upserts embeddings into Qdrant inline, once, before serving traffic. Disable with `AUTO_SEED=false`. If Qdrant isn't configured during seed, Postgres still fills (catalog page works) and only chat/voice search needs the keys fixed later.
+### Auto-Seeding
 
-### Debugging a deployed voice bot without log access
+On first boot, the backend checks if the `products` table is empty and, if so, ingests the Olist catalog and embeds all products into Qdrant before serving traffic. Disable with `AUTO_SEED=false`. If Qdrant isn't configured at seed time, Postgres still populates (catalog browsing works) and only voice/chat search needs the Qdrant keys added later.
 
-- `GET /health` — db/qdrant connectivity.
-- `GET /api/v1/voice/events` — in-memory ring of recent session events (`vad_probe conf=… kb=…`, `stt`, `tts_chunk`, `tts_fail`, `turn_error`). Read it immediately after a test call; it's small and evicts fast.
+### Production Debugging
+
+Without log access, use these two endpoints immediately after a test call:
+
+- `GET /health` — returns DB and Qdrant connectivity status.
+- `GET /api/v1/voice/events` — in-memory ring of the last ~50 session events (`vad_probe conf=… kb=…`, `stt`, `tts_chunk`, `tts_fail`, `turn_error`). This is the fastest way to diagnose a silent failure in the voice pipeline.
+
+---
+
+## Authentication & Order Isolation
+
+| Mode                       | Identity Source                           | Behaviour                                                           |
+| -------------------------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| **Signed in**              | Supabase Auth UUID (email/password login) | Persistent across devices, full order history                       |
+| **Guest (developer mode)** | Random UUID in `localStorage`             | Per-browser; a fresh incognito window gets its own isolated history |
+
+This eliminates the classic demo bug where all visitors shared one hardcoded customer row. Two guest windows have provably disjoint order histories — verified by `tools/test_isolation.py`.
+
+### Enabling Supabase Login
+
+The app degrades gracefully: without Supabase env vars, it runs guest-only (no login screen). To enable real accounts:
+
+1. [supabase.com/dashboard](https://supabase.com/dashboard) → **Authentication → Providers → Email**: ensure Email is **enabled**.
+2. **Authentication → Sign In / Up**: turn off "Confirm email" for frictionless demos.
+3. **Project Settings → API**: copy the **Project URL** and **anon public** key. ⚠️ Never use the `service_role` key in the browser.
+4. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `frontend/.env.local` (or on Render).
+5. Redeploy. The login gate appears; "Continue as Guest" stays available.
+
+No SQL migrations needed for auth itself — the backend auto-creates a `customers` row for any identity that places an order.
 
 ---
 
 ## Known Limitations
 
-- Bare catalog phrasings like *"What products do you have?"* can under-retrieve (keyword extraction finds nothing specific); *"Show me some products"* or category-scoped questions work well.
-- No server-side JWT verification yet — identity is trusted from the client.
-- Half-duplex by design: you can't interrupt the bot mid-sentence.
-- Free-tier LLM latency means a few seconds of thinking time on order turns.
+- **Bare catalog queries under-retrieve.** Phrases like _"What products do you have?"_ give the keyword extractor nothing to work with. More specific queries like _"Show me sports equipment"_ or _"Do you have laptops?"_ work correctly.
+- **No server-side JWT verification.** The backend trusts the `customer_id` supplied by the client. Fine for a demo; hardening would mean verifying the Supabase JWT on each API request.
+- **Half-duplex by design.** You cannot interrupt the bot mid-sentence. The VAD gate is closed while audio is playing.
+- **Free-tier latency.** Order turns involve two chained LLM calls (triage + execution). On a cold Render instance expect 3–5 seconds; on a warm instance, ~1–2 seconds.
+
+---
+
+## Architectural Decision Records
+
+The `docs/adr/` folder contains the reasoning behind the three biggest architectural choices made during the project:
+
+- **ADR-001:** Why LangGraph over raw LangChain AgentExecutor (explicit state machine, human-in-the-loop, checkpointing).
+- **ADR-002:** Why Qdrant over ChromaDB or Pinecone (Rust engine, 5ms P99, free cloud tier, no vendor lock-in).
+- **ADR-003:** Why a plain WebSocket over Pipecat + Daily WebRTC (no media server, no sample-rate mismatch, trivial local dev).

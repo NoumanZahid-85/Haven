@@ -443,7 +443,7 @@ export default function ChatPage() {
       <PageHeader
         icon={<MicrophoneStage size={17} weight="duotone" />}
         title="Voice Chat"
-        subtitle={<span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>SESSION {sessionId.toUpperCase()}</span>}
+        subtitle={`SESSION ${sessionId.toUpperCase()}`}
         actions={
           /* Mode toggle */
           <div className="seg" role="tablist" aria-label="Chat mode">

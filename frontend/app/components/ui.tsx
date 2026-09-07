@@ -22,7 +22,7 @@ import type { OrderStatus } from "@/lib/types";
 interface PageHeaderProps {
   icon: ReactNode;
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   actions?: ReactNode;
 }
 

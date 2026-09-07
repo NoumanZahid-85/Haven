@@ -16,12 +16,28 @@ import { AuthGate, useIdentity } from "@/components/auth";
 
 const NAV = {
   workspace: [
-    { href: "/chat", label: "Voice Chat", icon: <MicrophoneStage size={18} weight="duotone" /> },
-    { href: "/orders", label: "Orders", icon: <ShoppingCartSimple size={18} weight="duotone" /> },
-    { href: "/catalog", label: "Catalog", icon: <Storefront size={18} weight="duotone" /> },
+    {
+      href: "/chat",
+      label: "Voice Chat",
+      icon: <MicrophoneStage size={18} weight="duotone" />,
+    },
+    {
+      href: "/orders",
+      label: "Orders",
+      icon: <ShoppingCartSimple size={18} weight="duotone" />,
+    },
+    {
+      href: "/catalog",
+      label: "Catalog",
+      icon: <Storefront size={18} weight="duotone" />,
+    },
   ],
   system: [
-    { href: "/admin", label: "Admin", icon: <ChartLineUp size={18} weight="duotone" /> },
+    {
+      href: "/admin",
+      label: "Admin",
+      icon: <ChartLineUp size={18} weight="duotone" />,
+    },
   ],
 } as const;
 
@@ -48,10 +64,16 @@ function AccountChip({ compact = false }: { compact?: boolean }) {
         gap: 6,
       }}
     >
-      <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+      <span
+        style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}
+      >
         <UserCircle size={15} weight="duotone" color="var(--signal)" />
         <span
-          style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
           title={identity.customerId}
         >
           {identity.label}
@@ -110,19 +132,15 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       {/* ── Desktop sidebar ── */}
-      <aside
-        className="sidebar"
-        style={{ display: "none" }}
-        data-desktop-sidebar
-      >
+      <aside className="sidebar desktop-only">
         <div className="sidebar-brand">
           <Waveform size={20} color="var(--signal)" weight="fill" />
-          <span>
-            OMNIVOICE
-          </span>
+          <span>OMNIVOICE</span>
         </div>
         <nav className="sidebar-nav">{NavList}</nav>
-        <div style={{ padding: "12px 10px", borderTop: "1px solid var(--line)" }}>
+        <div
+          style={{ padding: "12px 10px", borderTop: "1px solid var(--line)" }}
+        >
           <Link href="/" className="sidebar-item">
             <House size={17} weight="duotone" />
             Back to Home
@@ -132,30 +150,34 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* ── Mobile top bar ── */}
-      <div style={{ display: "none" }} data-mobile-bar>
+      <div className="mobile-bar mobile-only">
         <div className="sidebar-brand">
-          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", color: "inherit" }}>
+          <Link
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
             <Waveform size={19} color="var(--signal)" weight="fill" />
-            <span>
-              OMNIVOICE
-            </span>
+            <span>OMNIVOICE</span>
           </Link>
         </div>
         <nav
           style={{
             display: "flex",
-            gap: 4,
-            overflowX: "auto",
-            padding: "8px 12px",
-            borderBottom: "1px solid var(--line)",
+            flexDirection: "column",
+            borderTop: "1px solid var(--line)",
           }}
         >
           {[...NAV.workspace, ...NAV.system].map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="sidebar-item"
-              style={{ whiteSpace: "nowrap", margin: 0 }}
+              className={`sidebar-item ${isActive(item.href) ? "active" : ""}`}
               aria-current={isActive(item.href) ? "page" : undefined}
             >
               {item.icon}
@@ -167,7 +189,14 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* ── Main content ── */}
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <main
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+        }}
+      >
         {children}
       </main>
     </div>

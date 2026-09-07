@@ -230,6 +230,12 @@ export default function CatalogPage() {
                 placeholder="Search products…"
                 style={{ paddingLeft: 32, paddingTop: 8, paddingBottom: 8 }}
                 aria-label="Search products"
+                lang="en"
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                autoComplete="off"
+                inputMode="search"
               />
             </div>
             <button

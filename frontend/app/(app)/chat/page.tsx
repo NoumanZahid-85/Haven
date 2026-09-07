@@ -443,7 +443,7 @@ export default function ChatPage() {
       <PageHeader
         icon={<MicrophoneStage size={17} weight="duotone" />}
         title="Voice Chat"
-        subtitle={`SESSION ${sessionId.toUpperCase()}`}
+        subtitle={<span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>SESSION {sessionId.toUpperCase()}</span>}
         actions={
           /* Mode toggle */
           <div className="seg" role="tablist" aria-label="Chat mode">
@@ -473,7 +473,7 @@ export default function ChatPage() {
                   )}
                   <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6 }}>
                     {m === "text" ? <ChatText size={14} weight="fill" /> : <Microphone size={14} weight="fill" />}
-                    {m === "text" ? "Text" : "Voice"}
+                    <span className="mode-label">{m === "text" ? "Text" : "Voice"}</span>
                   </span>
                 </button>
               );
@@ -553,21 +553,22 @@ export default function ChatPage() {
             style={{ overflow: "hidden" }}
           >
             <div
+              className="voice-console-row"
               style={{
-                padding: "13px 20px",
+                padding: "12px clamp(12px, 4vw, 20px)",
                 borderTop: "1px solid var(--line)",
                 background: "var(--chrome-deep)",
                 backdropFilter: "blur(12px)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                gap: 16,
+                gap: 12,
                 flexWrap: "wrap",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 220 }}>
-                <span className={`led ${voiceLed}`} />
-                <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+                <span className={`led ${voiceLed}`} style={{ flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
                   <div
                     className="label-mono"
                     style={{
@@ -575,28 +576,31 @@ export default function ChatPage() {
                       letterSpacing: "0.08em",
                       color: voiceState === "error" ? "var(--danger)" : voiceState === "listening" ? "var(--signal)" : "var(--text-mid)",
                       fontSize: "0.72rem",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
                   >
                     {VOICE_LABEL[voiceState]}
                   </div>
                   {voiceState === "listening" && (
-                    <div className="mono-id" style={{ fontSize: "0.62rem", opacity: 0.75 }}>
-                      MIC {micPackets} PKTS · CTX {micCtxRate}Hz
-                      {gateRef.current ? " · BOT SPEAKING" : " · LISTENING"}
+                    <div className="mono-id" style={{ fontSize: "0.6rem", opacity: 0.7, whiteSpace: "nowrap" }}>
+                      {micPackets} PKTS · {micCtxRate}Hz
+                      {gateRef.current ? " · 🔇 BOT" : " · 🎙 MIC"}
                     </div>
                   )}
                   {connError && (
-                    <div style={{ fontSize: "0.74rem", color: "var(--danger)", maxWidth: 420, marginTop: 3, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: "0.74rem", color: "var(--danger)", maxWidth: 360, marginTop: 3, lineHeight: 1.4 }}>
                       {connError}
                     </div>
                   )}
                 </div>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                 {voiceState !== "error" && (
-                  <div className="vu idle" aria-hidden="true">
-                    {Array.from({ length: 14 }).map((_, i) => (
+                  <div className="vu idle" aria-hidden="true" style={{ height: 28 }}>
+                    {Array.from({ length: 10 }).map((_, i) => (
                       <span key={i} />
                     ))}
                   </div>
@@ -608,19 +612,19 @@ export default function ChatPage() {
                     </button>
                   )}
                   {voiceState === "listening" ? (
-                    <button className="btn-danger btn-sm" onClick={stopVoice} style={{ padding: "8px 18px" }}>
+                    <button className="btn-danger btn-sm" onClick={stopVoice} style={{ padding: "8px 14px" }}>
                       <Stop size={15} weight="fill" />
-                      Disconnect
+                      Stop
                     </button>
                   ) : (
                     <button
                       className="btn-primary btn-sm"
                       onClick={startVoice}
                       disabled={voiceState === "connecting"}
-                      style={{ padding: "8px 18px" }}
+                      style={{ padding: "8px 14px" }}
                     >
                       {voiceState === "connecting" ? <Spinner size={15} className="blink" /> : <MicrophoneStage size={15} weight="fill" />}
-                      {voiceState === "connecting" ? "Connecting" : "Connect"}
+                      {voiceState === "connecting" ? "Connecting…" : "Connect"}
                     </button>
                   )}
                 </div>
@@ -674,10 +678,10 @@ export default function ChatPage() {
       {mode === "text" && (
         <div
           style={{
-            padding: "12px clamp(16px, 4vw, 40px) 14px",
+            padding: "10px clamp(12px, 4vw, 40px) env(safe-area-inset-bottom, 12px)",
             borderTop: "1px solid var(--line)",
             display: "flex",
-            gap: 10,
+            gap: 8,
             alignItems: "center",
             background: "var(--chrome-deep)",
             backdropFilter: "blur(12px)",
@@ -696,12 +700,18 @@ export default function ChatPage() {
             disabled={loading}
             id="chat-input"
             aria-label="Message"
+            lang="en"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            autoComplete="off"
+            inputMode="text"
           />
           <button
             className="btn-primary"
             onClick={sendText}
             disabled={loading || !input.trim()}
-            style={{ flexShrink: 0, padding: "10px 16px" }}
+            style={{ flexShrink: 0, padding: "10px 14px" }}
             aria-label="Send message"
           >
             {loading ? <Spinner size={16} className="blink" /> : <PaperPlaneTilt size={16} weight="fill" />}

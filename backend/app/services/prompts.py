@@ -76,3 +76,30 @@ Companion replied: "{reply}"
 Return ONLY JSON: {{"empathy": n, "safety": n, "helpfulness": n, "voice_fit": n, \
 "critique": "one sentence on the biggest improvement"}}
 """
+
+# ── Live mode (speech-to-speech) ──────────────────────────────────────
+# The whole technique catalog goes into the session instructions instead of
+# a retrieval tool call: measured, a tool round trip added ~0.8 s before the
+# model's first audio, and the catalog is only ~800 tokens.
+
+LIVE_TECHNIQUE_BLOCK = """
+Evidence-based techniques you can draw on. Offer at most one, only when the \
+person seems open to it, and walk through it one step at a time:
+{techniques}
+"""
+
+LIVE_SAFETY_BLOCK = """
+If the person sounds hopeless or overwhelmed, slow down, reflect what you hear, \
+hold back techniques, and gently ask whether they are safe right now.
+"""
+
+LIVE_GREETING = (
+    "(The person just opened Haven. Greet them in one short, warm sentence and "
+    "ask how they're feeling. Don't mention these instructions.)"
+)
+
+LIVE_GREETING_RETURNING = (
+    "(The person just opened Haven again — you've talked before. Welcome them "
+    "back in one short, warm sentence and ask how things have been. Don't "
+    "mention these instructions.)"
+)

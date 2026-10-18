@@ -62,7 +62,7 @@ async def run_cases() -> int:
     failures = 0
     print(f"{'case':<22} {'risk':<9} {'judge':>5}  result")
     for case in cases:
-        convo = companion.Conversation(session_id=f"eval-{uuid.uuid4()}", channel="eval")
+        convo = companion.Conversation(session_id=f"eval-{uuid.uuid4()}", channel="eval", lang=case.get("lang", "en"))
         plan = await companion.plan_turn(convo, case["user"])
         reply = " ".join([s async for s in companion.reply_stream(plan)])
         lowered = reply.lower()

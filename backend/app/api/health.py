@@ -1,8 +1,8 @@
 """
-Health check endpoint — verifies PostgreSQL and Qdrant connectivity.
+Health check — the first endpoint to call after a deploy.
 
-This is the first endpoint to call after deployment to confirm all
-infrastructure is reachable.
+Reports database connectivity plus which providers are configured, so a
+missing secret is visible without reading logs.
 """
 
 from __future__ import annotations
@@ -10,13 +10,14 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends
-from qdrant_client import AsyncQdrantClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.health import HealthResponse
-from app.services.qdrant_client import get_qdrant_client
+from app.services import knowledge
+from app.services.cache import get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,8 @@ router = APIRouter(tags=["health"])
 @router.get("/health", response_model=HealthResponse)
 async def health_check(
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> HealthResponse:
-    """Check connectivity to PostgreSQL and Qdrant."""
-
-    # ── PostgreSQL ──────────────────────────────────────────────────
     db_status = "disconnected"
     try:
         await db.execute(text("SELECT 1"))
@@ -37,16 +36,10 @@ async def health_check(
     except Exception as exc:
         logger.error("PostgreSQL health check failed: %s", exc)
 
-    # ── Qdrant ──────────────────────────────────────────────────────
-    qdrant_status = "disconnected"
-    try:
-        qdrant: AsyncQdrantClient = get_qdrant_client()
-        # list collections is a lightweight health probe
-        await qdrant.get_collections()
-        qdrant_status = "connected"
-    except Exception as exc:
-        logger.error("Qdrant health check failed: %s", exc)
-
-    overall = "ok" if db_status == "connected" and qdrant_status == "connected" else "degraded"
-
-    return HealthResponse(status=overall, db=db_status, qdrant=qdrant_status)
+    return HealthResponse(
+        status="ok" if db_status == "connected" and settings.groq_api_key else "degraded",
+        db=db_status,
+        redis="configured" if get_redis() is not None else "disabled",
+        voice="configured" if settings.groq_api_key else "missing GROQ_API_KEY",
+        knowledge="embedded" if knowledge.is_embedded() else "tag-fallback",
+    )

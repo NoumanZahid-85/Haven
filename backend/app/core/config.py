@@ -28,45 +28,24 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Database (required for Phase 1) ─────────────────────────────
-    database_url: str  # postgresql+asyncpg://...
-    supabase_url: str = ""
-    supabase_key: str = ""
+    # ── Storage ─────────────────────────────────────────────────────
+    database_url: str  # postgresql+asyncpg://...  (turns, memories, evals)
+    redis_url: str = ""  # short-term conversation window; optional
 
-    # ── Vector DB (required for Phase 1) ────────────────────────────
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_api_key: str = ""
-
-    # ── LLM Providers (optional until Phase 2) ─────────────────────
-    groq_api_key: str = ""
+    # ── Model providers ─────────────────────────────────────────────
+    groq_api_key: str = ""  # STT (Whisper), TTS (Orpheus), primary LLM
+    gemini_api_key: str = ""  # fallback LLM + embeddings for technique retrieval
     openai_api_key: str = ""
     openai_base_url: str = ""
     openai_model_name: str = ""
-    gemini_api_key: str = ""
 
-    # ── Voice Services (optional until Phase 3) ────────────────────
-    daily_api_key: str = ""
-    deepgram_api_key: str = ""
-    cartesia_api_key: str = ""
-
-    # ── Redis / Upstash (optional until Phase 7) ───────────────────
-    redis_url: str = ""
-
-    # ── Observability (optional until Phase 7) ─────────────────────
-    langsmith_api_key: str = ""
-    otel_exporter_endpoint: str = ""
-
-    # ── RAG (Phase 2) ─────────────────────────────────────────────
-    # Embedding model is now hardcoded in app/services/embeddings.py
-    # (EMBEDDING_MODEL, EMBEDDING_DIMENSIONS) since it calls the OpenAI
-    # API rather than loading a configurable local model.
-    rag_top_k: int = 5
-    rag_cache_ttl_seconds: int = 86400  # 24h FAQ cache
-    rag_memory_turns: int = 10  # conversation history kept per session
-    rag_vector_score_threshold: float = 0.45  # below this → keyword fallback
+    # ── Conversation ────────────────────────────────────────────────
+    memory_turns: int = 10  # short-term window kept per session
+    memory_facts: int = 12  # long-term facts injected into the prompt
+    knowledge_top_k: int = 2  # coping techniques retrieved per turn
 
     # ── Application ────────────────────────────────────────────────
-    app_name: str = "OMNIVOICE"
+    app_name: str = "Haven"
     debug: bool = False
     log_level: str = "INFO"
 

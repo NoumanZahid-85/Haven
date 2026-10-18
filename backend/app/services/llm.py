@@ -10,6 +10,7 @@ Config-driven: adding/removing providers requires zero code changes.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any, cast
 
@@ -38,8 +39,9 @@ def get_llm_router():
                     # is Groq's recommended replacement.
                     "model": "groq/openai/gpt-oss-120b",
                     "api_key": settings.groq_api_key,
-                    # 15s — order extraction prompts can take 8-12s on busy
-                    # Groq free-tier; 5s caused silent cascade failures.
+                    # gpt-oss is a reasoning model; "low" keeps time-to-first-
+                    # token voice-friendly — empathy doesn't need a long chain.
+                    "reasoning_effort": "low",
                     "timeout": 15,
                 },
             }
@@ -133,3 +135,24 @@ async def llm_generate(
         max_tokens=max_tokens,
     )
     return (response.choices[0].message.content or "").strip()
+
+
+async def llm_stream(
+    messages: list[dict[str, str]],
+    temperature: float = 0.6,
+    max_tokens: int = 450,  # reasoning tokens count toward this too
+) -> AsyncIterator[str]:
+    """Yield content deltas as they arrive — feeds sentence-level TTS so the
+    first sentence is being spoken while the rest is still generating."""
+    router = get_llm_router()
+    stream = await router.acompletion(
+        model=PRIMARY_MODEL,
+        messages=cast(Any, messages),
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=True,
+    )
+    async for chunk in cast(Any, stream):
+        delta = chunk.choices[0].delta.content if chunk.choices else None
+        if delta:
+            yield delta

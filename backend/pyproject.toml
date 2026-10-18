@@ -1,32 +1,25 @@
 [project]
-name = "voicesell-backend"
-version = "0.1.0"
-description = "VoiceSell AI — Voice-enabled sales chatbot backend"
+name = "haven-backend"
+version = "1.0.0"
+description = "Haven — real-time voice companion for mental wellbeing"
 requires-python = ">=3.11"
 dependencies = [
-    "alembic>=1.19.1",
     "asyncpg>=0.31.0",
     "fastapi[standard]>=0.141.1",
     "greenlet>=3.5.5",
+    "groq>=0.30.0",
     "gunicorn>=21.0.0",
     "httpx>=0.28.1",
-    "langchain-core>=0.3.0",
-    "langgraph>=0.2.60",
     "litellm>=1.40.0",
+    "numpy>=1.26.0",
     "pydantic-settings>=2.15.0",
-    "pydantic[email]>=2.13.0",
     "python-dotenv>=1.2.2",
-    "qdrant-client>=1.19.0",
     "redis>=5.0.0",
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn[standard]>=0.52.1",
-    # Phase 5 — association rule mining (mine_associations.py script)
-    "mlxtend>=0.23.0",
-    "pandas>=2.0.0",
-    # Phase 3 — voice pipeline (Linux/macOS only; daily-python has no Windows wheel).
-    # In the Docker container (Linux) this installs automatically.
-    # On Windows dev machines, install the mock extras (see [dependency-groups] below).
-    "pipecat-ai[daily,groq,silero]>=0.0.50 ; sys_platform != 'win32'",
+    # Silero VAD only (bundled ONNX model). No Daily/WebRTC transport — the
+    # voice path is a plain WebSocket — so this now installs on Windows too.
+    "pipecat-ai[silero]>=0.0.50",
 ]
 
 [dependency-groups]

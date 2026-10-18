@@ -29,10 +29,30 @@ logger = logging.getLogger(__name__)
 
 async def ensure_schema() -> None:
     """Create DB tables if missing (dev convenience — Alembic owns prod)."""
-    engine = get_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Connected to PostgreSQL — tables synced")
+    import asyncio
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            engine = get_engine()
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Connected to PostgreSQL — tables synced")
+            return
+        except Exception as exc:
+            if attempt < max_retries:
+                logger.warning(
+                    "PostgreSQL connection attempt %d/%d failed: %s. Retrying in 2s...",
+                    attempt,
+                    max_retries,
+                    exc,
+                )
+                await asyncio.sleep(2)
+            else:
+                logger.error(
+                    "PostgreSQL schema sync failed after %d attempts: %s. Continuing in degraded mode.",
+                    max_retries,
+                    exc,
+                )
 
 
 async def ensure_products_collection() -> None:

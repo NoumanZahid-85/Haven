@@ -8,4 +8,6 @@ from pydantic import BaseModel
 class HealthResponse(BaseModel):
     status: str
     db: str
-    qdrant: str
+    redis: str
+    voice: str
+    knowledge: str

@@ -6,21 +6,13 @@ from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=1000, description="Customer message")
+    message: str = Field(..., min_length=1, max_length=2000, description="What the user said")
     session_id: str = Field(..., min_length=1, max_length=200, description="Conversation session identifier")
-    customer_id: str = Field(default="", max_length=64, description="Supabase auth user id or guest id; empty = shared demo customer")
-    debug: bool = Field(default=False, description="Include gate diagnostics in the response (temporary)")
-
-
-class ChatSource(BaseModel):
-    product_id: str
-    name: str
-    price: float
-    score: float
+    user_id: str = Field(default="", max_length=64, description="Supabase auth user id or guest id")
 
 
 class ChatResponse(BaseModel):
     reply: str
-    sources: list[ChatSource]
-    cached: bool = False
-    debug: dict | None = None
+    risk: str = "none"
+    techniques: list[str] = []
+    llm_first_token_ms: float | None = None

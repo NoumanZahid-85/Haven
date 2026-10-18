@@ -8,10 +8,8 @@ inference) which OOM-kills on Render's free tier (512MB web service).
 Calling a hosted embeddings API needs no local model weights and no extra
 RAM beyond a small HTTP client, at the cost of a per-call API round trip.
 
-WHY Gemini and not OpenAI: gemini-embedding-001 outputs 768 dimensions
-natively — matches the existing Qdrant `products` collection
-(VECTOR_DIMENSION=768) with no truncation/config needed. GEMINI_API_KEY is
-already a configured secret for this project (see render.yaml).
+WHY Gemini and not OpenAI: GEMINI_API_KEY is already the fallback-LLM
+secret, so technique retrieval needs no extra provider.
 
 WHY not Groq: Groq's API is inference-only (chat, Whisper transcription,
 TTS) — it does not offer an embeddings endpoint as of this writing.
@@ -19,7 +17,7 @@ TTS) — it does not offer an embeddings endpoint as of this writing.
 If you move the backend to a paid plan with enough RAM, you can swap this
 back to a local sentence-transformers implementation for zero-marginal-cost
 embeddings; keep the `embed`/`embed_one` interface the same and callers
-(app/services/rag.py, scripts/embed_products.py) won't need to change.
+(app/services/knowledge.py) won't need to change.
 """
 
 from __future__ import annotations
@@ -33,7 +31,7 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "gemini-embedding-001"
-EMBEDDING_DIMENSIONS = 768  # truncated via output_dimensionality — must match qdrant_client.VECTOR_DIMENSION
+EMBEDDING_DIMENSIONS = 768  # truncated via output_dimensionality
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _BATCH_ENDPOINT = f"{_API_BASE}/models/{EMBEDDING_MODEL}:batchEmbedContents"
 
@@ -90,10 +88,3 @@ def get_embedder() -> EmbeddingService:
         _embedder = EmbeddingService()
     return _embedder
 
-
-def warm_embedder() -> None:
-    """No-op now — nothing to pre-load for an API-backed embedder.
-
-    Kept so app/bootstrap.py doesn't need an import-site change.
-    """
-    logger.info("Embedding service uses Gemini API — no local warm-up needed")

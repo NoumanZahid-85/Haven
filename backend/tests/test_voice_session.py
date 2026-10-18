@@ -1,24 +1,23 @@
-"""Voice session floor control — no network: fake socket, fake TTS, fake VAD."""
+"""Voice engines — no network: fake browser socket, fake Deepgram TTS, fake LLM, fake Gemini messages."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace as NS
 
 import pytest
 
 from app.services import companion
-from app.voice import ws_session
-from app.voice.ws_session import GREETING, VoiceWSSession
+from app.services.safety import CRISIS_RESPONSE
+from app.voice import deepgram
+from app.voice.live_session import LiveSession
+from app.voice.pipeline_session import PipelineSession
 
 
 class FakeWS:
     def __init__(self) -> None:
-        self.inbox: asyncio.Queue[dict] = asyncio.Queue()
         self.sent: list[dict | bytes] = []
-
-    async def receive(self) -> dict:
-        return await self.inbox.get()
 
     async def send_text(self, text: str) -> None:
         self.sent.append(json.loads(text))
@@ -29,138 +28,212 @@ class FakeWS:
     def events(self) -> list[str]:
         return [m["type"] for m in self.sent if isinstance(m, dict)]
 
-    def control(self, payload: dict) -> None:
-        self.inbox.put_nowait({"type": "websocket.receive", "text": json.dumps(payload)})
+    def audio(self) -> list[bytes]:
+        return [m for m in self.sent if isinstance(m, bytes)]
 
-
-class FakeVAD:
-    """Scripted speech probabilities instead of the Silero model."""
-
-    def __init__(self) -> None:
-        self.next = 0.0
-
-    def feed(self, _pcm: bytes) -> float:
-        return self.next
+    def captions(self) -> str:
+        return "".join(m["text"] for m in self.sent if isinstance(m, dict) and m["type"] == "agent_caption")
 
 
 async def _until(predicate, timeout: float = 2.0) -> None:
-    deadline = asyncio.get_running_loop().time() + timeout
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     while not predicate():
-        if asyncio.get_running_loop().time() > deadline:
+        if loop.time() > deadline:
             raise AssertionError("condition not reached")
         await asyncio.sleep(0.01)
 
 
+@pytest.fixture(autouse=True)
+def fake_tts(monkeypatch):
+    async def tts(text: str, *, cache: bool = False):
+        yield b"\x01\x00" * 8  # one tiny PCM chunk per sentence
+
+    monkeypatch.setattr(deepgram, "tts_stream", tts)
+
+
 @pytest.fixture()
-def session(monkeypatch):
-    monkeypatch.setattr(ws_session, "SileroGate", FakeVAD)
+def fake_llm(monkeypatch):
+    calls: list[list[dict]] = []
+
+    async def stream(messages):
+        calls.append(messages)
+        for part in ["That sounds hard. ", "What's on your mind?"]:
+            await asyncio.sleep(0.01)
+            yield part
+
+    monkeypatch.setattr(companion, "llm_stream", stream)
+    return calls
+
+
+def pipeline(barge_in: bool = False) -> tuple[PipelineSession, FakeWS]:
     ws = FakeWS()
-    s = VoiceWSSession(ws, "test-session")
-    return s, ws
+    return PipelineSession(ws, "pipe-test", barge_in=barge_in), ws
+
+
+# ── Shared bridge ─────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_late_turn_completion_releases_the_mic(session, monkeypatch):
-    """playback_done arriving before a slow last sentence finishes used to
-    latch `busy` forever — the mic was dead for the rest of the session."""
-    s, ws = session
+async def test_speak_holds_audio_until_committed():
+    s, ws = pipeline()
+    commit = asyncio.Event()
+
+    async def sentences():
+        yield "First."
+        yield "Second."
+
+    task = asyncio.create_task(s.speak(sentences(), commit=commit))
+    await asyncio.sleep(0.05)
+    assert ws.sent == []  # prepared, not heard
+    commit.set()
+    spoken, first = await task
+    assert spoken == ["First.", "Second."]
+    assert ws.events() == ["speaking_start", "agent_caption", "agent_caption", "reply_end"]
+    assert len(ws.audio()) == 2 and first is not None
+
+
+# ── Pipeline mode (Flux turn events) ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_eager_reply_is_released_on_matching_end_of_turn(fake_llm):
+    s, ws = pipeline()
+    await s.on_turn_event("EagerEndOfTurn", "I can't sleep tonight")
+    await asyncio.sleep(0.1)
+    assert ws.audio() == []  # speculative: generated but held
+    await s.on_turn_event("EndOfTurn", "I can't sleep tonight.")
+    await _until(lambda: "reply_end" in ws.events())
+    assert len(fake_llm) == 1  # the speculative generation was reused, not redone
+    assert ws.captions() == "That sounds hard. What's on your mind? "
+
+
+@pytest.mark.asyncio
+async def test_turn_resumed_discards_speculative_reply(fake_llm):
+    s, ws = pipeline()
+    await s.on_turn_event("EagerEndOfTurn", "I can't sleep")
+    await s.on_turn_event("TurnResumed", "")
+    await s.on_turn_event("EndOfTurn", "I can't sleep because of my exam tomorrow")
+    await _until(lambda: "reply_end" in ws.events())
+    # The heard reply was generated from the full turn, not the eager fragment.
+    assert fake_llm[-1][-1]["content"] == "I can't sleep because of my exam tomorrow"
+    assert ws.events().count("transcript") == 1
+    assert ws.events().count("speaking_start") == 1
+
+
+@pytest.mark.asyncio
+async def test_barge_in_interrupts_audible_reply(fake_llm, monkeypatch):
     release = asyncio.Event()
 
-    async def synth(text: str, _sem) -> bytes:
-        if text.startswith("How are you"):
-            await release.wait()  # last greeting sentence stuck in TTS retry
-        return b"RIFF-fake-wav"
+    async def slow_stream(messages):
+        yield "First sentence. "
+        await release.wait()  # the rest never arrives on its own
+        yield "Never heard."
 
-    monkeypatch.setattr(s, "_synthesize", synth)
-    runner = asyncio.create_task(s.run())
-    await _until(lambda: any(isinstance(m, bytes) for m in ws.sent))
-
-    ws.control({"type": "playback_done", "turn": 1})
-    await _until(lambda: not s.speaking)
-    assert s.busy  # turn still in flight
-
-    release.set()
-    await _until(lambda: "reply_end" in ws.events())
-    await _until(lambda: not s.busy)
-    runner.cancel()
-
-
-@pytest.mark.asyncio
-async def test_stale_playback_done_is_ignored(session, monkeypatch):
-    s, ws = session
-
-    async def synth(_text: str, _sem) -> bytes:
-        return b"wav"
-
-    monkeypatch.setattr(s, "_synthesize", synth)
-    runner = asyncio.create_task(s.run())
-    await _until(lambda: "reply_end" in ws.events())
-    s.turn_no = 5  # a later turn now has the floor
-    s.speaking = True
-    ws.control({"type": "playback_done", "turn": 1})
-    await asyncio.sleep(0.05)
-    assert s.speaking
-    runner.cancel()
-
-
-@pytest.mark.asyncio
-async def test_barge_in_cancels_reply_and_starts_capture(monkeypatch):
-    monkeypatch.setattr(ws_session, "SileroGate", FakeVAD)
-    ws = FakeWS()
-    s = VoiceWSSession(ws, "barge", barge_in=True)
-    gate = asyncio.Event()
-
-    async def synth(text: str, _sem) -> bytes:
-        if not text.startswith("Hi"):
-            await gate.wait()  # later sentences never finish on their own
-        return b"wav"
-
-    monkeypatch.setattr(s, "_synthesize", synth)
-    runner = asyncio.create_task(s.run())
-    await _until(lambda: s._audio_out)
-
-    s.vad.next = 0.95  # user starts talking over the bot
-    chunk = b"\x00\x00" * 1600  # 100 ms of 16 kHz PCM16
-    for _ in range(5):
-        s._feed_vad(chunk)
+    monkeypatch.setattr(companion, "llm_stream", slow_stream)
+    s, ws = pipeline(barge_in=True)
+    await s.on_turn_event("EndOfTurn", "Tell me something")
+    await _until(lambda: len(ws.audio()) == 1)
+    await s.on_turn_event("StartOfTurn", "")
     await _until(lambda: "interrupt" in ws.events())
-    assert s._state == "capturing"
-    assert not s.busy and not s.speaking
-    runner.cancel()
+    assert s.reply is None
+    assert "Never heard." not in ws.captions()
 
 
 @pytest.mark.asyncio
-async def test_half_duplex_discards_audio_while_bot_speaks(session):
-    s, _ws = session
-    s.busy = True
-    s.vad.next = 0.99
-    for _ in range(10):
-        s._feed_vad(b"\x00\x00" * 1600)
-    assert s._state == "idle"
+async def test_words_are_carried_when_user_continues_before_audio(monkeypatch):
+    gate = asyncio.Event()
+    seen: list[str] = []
+
+    async def stream(messages):
+        seen.append(messages[-1]["content"])
+        await gate.wait()
+        yield "Okay."
+
+    monkeypatch.setattr(companion, "llm_stream", stream)
+    s, ws = pipeline()
+    await s.on_turn_event("EndOfTurn", "I had a fight with my sister")
+    await _until(lambda: seen)
+    await s.on_turn_event("StartOfTurn", "")  # nothing audible yet: user is mid-thought
+    await s.on_turn_event("EndOfTurn", "and now she won't talk to me")
+    gate.set()
+    await _until(lambda: "reply_end" in ws.events())
+    assert seen[-1] == "I had a fight with my sister and now she won't talk to me"
 
 
 @pytest.mark.asyncio
-async def test_prewarm_caches_exactly_what_speak_requests(monkeypatch):
-    synthesized: list[str] = []
+async def test_pipeline_crisis_bypasses_llm(fake_llm):
+    s, ws = pipeline()
+    await s.on_turn_event("EndOfTurn", "I want to end my life")
+    await _until(lambda: "reply_end" in ws.events())
+    assert fake_llm == []
+    assert {"type": "risk", "level": "crisis"} in ws.sent
+    assert "988" in ws.captions()
 
-    class FakeSpeech:
-        async def create(self, *, input: str, **_kw):
-            synthesized.append(input)
 
-            class Resp:
-                async def read(self) -> bytes:
-                    return b"wav"
+# ── Live mode (Gemini server messages) ───────────────────────────────
 
-            return Resp()
 
-    class FakeGroq:
-        def __init__(self, **_kw) -> None:
-            self.audio = type("A", (), {"speech": FakeSpeech()})()
+def live() -> tuple[LiveSession, FakeWS]:
+    ws = FakeWS()
+    return LiveSession(ws, "live-test"), ws
 
-    monkeypatch.setattr(ws_session, "AsyncGroq", FakeGroq)
-    ws_session._tts_cache.clear()
-    await ws_session.prewarm_tts("key")
 
-    pieces = [p async for s in companion.sentences(ws_session._once(GREETING)) for p in ws_session._split_for_tts(s)]
-    assert pieces and all(ws_session._tts_cache_get(p) is not None for p in pieces)
-    assert GREETING not in synthesized  # the whole string is never a cache key
+def msg(*, heard=None, said=None, audio=None, interrupted=False, done=False):
+    parts = [NS(inline_data=NS(data=audio))] if audio else None
+    return NS(
+        go_away=None,
+        server_content=NS(
+            input_transcription=NS(text=heard) if heard else None,
+            output_transcription=NS(text=said) if said else None,
+            model_turn=NS(parts=parts) if parts else None,
+            interrupted=interrupted,
+            turn_complete=done,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_turn_relays_audio_and_captions():
+    s, ws = live()
+    await s.handle(msg(heard="I feel stressed"))
+    await s.handle(msg(audio=b"\x00\x01" * 4, said="That sounds heavy."))
+    await s.handle(msg(done=True))
+    assert ws.events() == ["user_partial", "transcript", "speaking_start", "agent_caption", "reply_end", "metrics"]
+    assert len(ws.audio()) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_crisis_mutes_model_and_speaks_script():
+    s, ws = live()
+    await s.handle(msg(audio=b"\x00\x01" * 4))  # model already talking
+    await s.handle(msg(heard="I don't want to be alive anymore"))
+    assert s.suppressed
+    await s.handle(msg(audio=b"\xff\xff" * 4, said="model words"))  # must be dropped
+    await _until(lambda: ws.events().count("reply_end") == 1)
+    assert "interrupt" in ws.events()
+    assert {"type": "risk", "level": "crisis"} in ws.sent
+    assert "model words" not in ws.captions()
+    assert ws.captions().strip() == CRISIS_RESPONSE
+    await s.handle(msg(done=True))
+    assert not s.suppressed  # next turn is the model's again
+
+
+@pytest.mark.asyncio
+async def test_live_output_guardrail_replaces_unsafe_reply():
+    s, ws = live()
+    await s.handle(msg(heard="what should I take"))
+    await s.handle(msg(audio=b"\x00\x01" * 4, said="You could take 50 mg tonight."))
+    await _until(lambda: "reply_end" in ws.events())
+    assert "interrupt" in ws.events()
+    assert "doctor or therapist" in ws.captions()
+
+
+@pytest.mark.asyncio
+async def test_live_barge_in_forwards_interrupt():
+    s, ws = live()
+    await s.handle(msg(heard="hello"))
+    await s.handle(msg(audio=b"\x00\x01" * 4))
+    await s.handle(msg(interrupted=True))
+    assert ws.events()[-1] == "interrupt"
+    assert not s.turn_open

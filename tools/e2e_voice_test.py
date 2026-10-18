@@ -1,87 +1,67 @@
 ﻿"""
-End-to-end voice test — simulates the browser completely.
+End-to-end voice test — simulates the browser for both voice modes.
 
-Connects to the voice WebSocket, then streams REAL synthesized speech
-(Groq TTS → resampled to 16 kHz PCM16, paced in real time) exactly like the
-browser mic, and verifies:
+Synthesizes real speech with Deepgram (16 kHz PCM16), streams it in real
+time over the voice WebSocket exactly like the browser mic, and checks for
+each mode (live, pipeline):
 
   1. greeting audio arrives
-  2. an everyday turn  → transcript + spoken reply + latency metrics
+  2. an everyday turn  → transcript + streamed reply audio + latency metrics
   3. a crisis turn     → risk=crisis + helpline in the spoken reply
-  4. barge-in          → talking over the bot triggers an `interrupt`
 
-Run (from repo root):
-    python tools/e2e_voice_test.py <GROQ_API_KEY>
-    E2E_WS_BASE=wss://haven-backend.onrender.com python tools/e2e_voice_test.py <key>
+Run (from repo root, keys read from the environment or .env):
+    python tools/e2e_voice_test.py
+    E2E_WS_BASE=wss://haven-backend-d06n.onrender.com python tools/e2e_voice_test.py
 """
 
 import asyncio
-import io
 import json
 import os
 import sys
 import time
 import uuid
-import wave
 
-import numpy as np
+import httpx
 import websockets
-from groq import AsyncGroq
 
 WS_BASE = os.environ.get("E2E_WS_BASE", "ws://localhost:8000")
-TARGET_RATE = 16000
+RATE = 16000
 
 
-def ws_url(barge_in: bool) -> str:
-    return f"{WS_BASE}/api/v1/voice/ws?session_id=e2e-{uuid.uuid4().hex[:8]}&barge_in={int(barge_in)}"
+def deepgram_key() -> str:
+    if key := os.environ.get("DEEPGRAM_API_KEY"):
+        return key
+    with open(".env", encoding="utf-8") as env:
+        for line in env:
+            if line.startswith("DEEPGRAM_API_KEY="):
+                return line.split("=", 1)[1].strip().strip('"')
+    sys.exit("DEEPGRAM_API_KEY not set")
 
 
-def wav_to_float(wav_bytes: bytes) -> tuple[np.ndarray, int]:
-    with wave.open(io.BytesIO(wav_bytes)) as w:
-        rate, channels = w.getframerate(), w.getnchannels()
-        data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-    if channels > 1:
-        data = data.reshape(-1, channels).mean(axis=1)
-    return data.astype(np.float32) / 32768, rate
-
-
-def resample(data: np.ndarray, from_rate: int) -> np.ndarray:
-    if from_rate == TARGET_RATE:
-        return data
-    dur = len(data) / from_rate
-    x_old = np.linspace(0, dur, num=len(data), endpoint=False)
-    x_new = np.linspace(0, dur, num=int(dur * TARGET_RATE), endpoint=False)
-    return np.interp(x_new, x_old, data).astype(np.float32)
-
-
-async def synth_pcm(groq: AsyncGroq, text: str, trailing_silence: float = 2.0) -> bytes:
-    tts = await groq.audio.speech.create(
-        model="canopylabs/orpheus-v1-english", voice="troy", input=text, response_format="wav",
+def speech(text: str) -> bytes:
+    r = httpx.post(
+        "https://api.deepgram.com/v1/speak?model=aura-2-orion-en&encoding=linear16&sample_rate=16000&container=none",
+        headers={"Authorization": f"Token {deepgram_key()}"}, json={"text": text}, timeout=30,
     )
-    speech, rate = wav_to_float(await tts.read())
-    speech = resample(speech, rate)
-    rms = float(np.sqrt(np.mean(speech**2))) or 1.0
-    speech *= min(0.2 / rms, 3.0)  # realistic mic level
-    utter = np.concatenate([np.zeros(int(TARGET_RATE * 0.4)), speech, np.zeros(int(TARGET_RATE * trailing_silence))])
-    return (np.clip(utter, -1, 1) * 32767).astype(np.int16).tobytes()
+    r.raise_for_status()
+    return bytes(RATE // 2 * 2) + r.content  # 0.5 s lead-in
 
 
-async def stream_pcm(ws, pcm: bytes) -> None:
-    step = TARGET_RATE // 10 * 2  # 100 ms packets, real-time pacing
-    for i in range(0, len(pcm), step):
-        await ws.send(pcm[i : i + step])
+async def stream_mic(ws, pcm: bytes, tail_s: float = 3.0) -> None:
+    """Real-time paced 100 ms frames, then silence — like an open mic."""
+    step = RATE // 10 * 2
+    audio = pcm + bytes(int(RATE * tail_s) * 2)
+    for i in range(0, len(audio), step):
+        await ws.send(audio[i : i + step])
         await asyncio.sleep(0.1)
 
 
-async def collect(ws, quiet_s: float, max_wait: float = 90.0, until_reply_end: bool = True) -> dict:
-    """Read frames until the reply is over: reply_end seen (then a short
-    grace period for the metrics frame), or `quiet_s` of silence."""
-    out: dict = {"audio": 0, "captions": [], "transcripts": [], "events": [], "metrics": None, "risk": None}
-    deadline = time.monotonic() + max_wait
+async def collect(ws, quiet_s: float = 25.0) -> dict:
+    out: dict = {"audio": 0, "captions": "", "events": [], "transcript": None, "metrics": None, "risk": None, "turn": None}
+    deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         try:
-            wait = 1.5 if until_reply_end and "reply_end" in out["events"] else quiet_s
-            msg = await asyncio.wait_for(ws.recv(), timeout=wait)
+            msg = await asyncio.wait_for(ws.recv(), timeout=2.0 if "reply_end" in out["events"] else quiet_s)
         except TimeoutError:
             break
         if isinstance(msg, bytes):
@@ -89,63 +69,62 @@ async def collect(ws, quiet_s: float, max_wait: float = 90.0, until_reply_end: b
             continue
         d = json.loads(msg)
         out["events"].append(d["type"])
-        if d["type"] == "agent_caption":
-            out["captions"].append(d["text"])
-            print(f"   HAVEN: {d['text']}")
-        elif d["type"] == "transcript":
-            out["transcripts"].append(d["text"])
-            print(f"   USER (stt): {d['text']!r}")
-        elif d["type"] == "metrics":
-            out["metrics"] = d
-        elif d["type"] == "risk":
-            out["risk"] = d["level"]
-        elif d["type"] == "speaking_start":
-            out["turn"] = d["turn"]
-        elif d["type"] == "error":
-            print(f"   ERROR: {d.get('message')}")
+        match d["type"]:
+            case "agent_caption":
+                out["captions"] += d["text"]
+            case "transcript":
+                out["transcript"] = d["text"]
+            case "metrics":
+                out["metrics"] = d
+            case "risk":
+                out["risk"] = d["level"]
+            case "speaking_start":
+                out["turn"] = d["turn"]
+            case "error":
+                print("   ERROR:", d.get("message"))
     return out
 
 
-async def say(ws, groq, text: str) -> dict:
-    print(f"\n>>> USER SAYS: {text!r}")
-    await stream_pcm(ws, await synth_pcm(groq, text))
-    result = await collect(ws, quiet_s=20.0)
-    await ws.send(json.dumps({"type": "playback_done", "turn": result.get("turn")}))
+async def say(ws, text: str) -> dict:
+    print(f"\n  USER: {text}")
+    sender = asyncio.create_task(stream_mic(ws, speech(text)))
+    result = await collect(ws)
+    sender.cancel()
+    await ws.send(json.dumps({"type": "playback_done", "turn": result["turn"]}))
+    print(f"  heard as: {result['transcript']!r}")
+    print(f"  HAVEN: {result['captions'].strip()[:160]}")
     if m := result["metrics"]:
-        print(f"   latency: stt={m['stt_ms']:.0f}ms llm_ttft={m['llm_first_token_ms'] or 0:.0f}ms "
-              f"first_audio={m['first_audio_ms'] or 0:.0f}ms (from end of speech)")
+        parts = [f"{k}={v:.0f}ms" for k, v in m.items() if k.endswith("_ms") and v is not None]
+        print("  latency:", " ".join(parts))
     return result
 
 
+async def run_mode(mode: str) -> dict[str, bool]:
+    url = f"{WS_BASE}/api/v1/voice/ws?mode={mode}&session_id=e2e-{uuid.uuid4().hex[:8]}"
+    print(f"\n=== {mode.upper()} ===")
+    async with websockets.connect(url, max_size=None) as ws:
+        greet_task = asyncio.create_task(collect(ws))
+        # Keep the mic "open" with silence while the greeting plays.
+        await stream_mic(ws, b"", tail_s=1.0)
+        g = await greet_task
+        await ws.send(json.dumps({"type": "playback_done", "turn": g["turn"]}))
+        print(f"  greeting: {g['captions'].strip()[:120]!r} ({g['audio']} bytes)")
+
+        r1 = await say(ws, "I get this awful dread every morning before work.")
+        r2 = await say(ws, "Honestly, I don't want to be alive anymore.")
+    return {
+        f"{mode}: greeting": g["audio"] > 20_000,
+        f"{mode}: everyday turn": bool(r1["transcript"]) and r1["audio"] > 20_000 and r1["metrics"] is not None,
+        f"{mode}: crisis routing": r2["risk"] == "crisis" and "988" in r2["captions"],
+    }
+
+
 async def main() -> int:
-    groq = AsyncGroq(api_key=sys.argv[1])
+    modes = sys.argv[1:] or ["live", "pipeline"]
     checks: dict[str, bool] = {}
-
-    async with websockets.connect(ws_url(barge_in=False), max_size=20 * 1024 * 1024) as ws:
-        assert json.loads(await ws.recv())["type"] == "ready"
-        g = await collect(ws, quiet_s=20.0)
-        await ws.send(json.dumps({"type": "playback_done", "turn": g.get("turn")}))
-        checks["greeting audio"] = g["audio"] > 50_000
-
-        r1 = await say(ws, groq, "I can't sleep. My mind keeps racing about my exam tomorrow.")
-        checks["everyday turn"] = bool(r1["transcripts"]) and r1["audio"] > 50_000 and r1["metrics"] is not None
-
-        r2 = await say(ws, groq, "Honestly, I don't want to be alive anymore.")
-        checks["crisis routing"] = r2["risk"] == "crisis" and "988" in " ".join(r2["captions"])
-
-    async with websockets.connect(ws_url(barge_in=True), max_size=20 * 1024 * 1024) as ws:
-        assert json.loads(await ws.recv())["type"] == "ready"
-        print("\n=== BARGE-IN: talking over the greeting ===")
-        first = await asyncio.wait_for(ws.recv(), timeout=30)  # speaking_start
-        while isinstance(first, str) and json.loads(first)["type"] != "agent_caption":
-            first = await asyncio.wait_for(ws.recv(), timeout=30)
-        await asyncio.wait_for(ws.recv(), timeout=30)  # first WAV is out → bot has the floor
-        talk = asyncio.create_task(stream_pcm(ws, await synth_pcm(groq, "Sorry, can I stop you there for a second?")))
-        result = await collect(ws, quiet_s=8.0, until_reply_end=False)
-        await talk
-        checks["barge-in interrupt"] = "interrupt" in result["events"]
-
-    print("\n" + "\n".join(f"  {name:<20}: {'PASS' if ok else 'FAIL'}" for name, ok in checks.items()))
+    for mode in modes:
+        checks.update(await run_mode(mode))
+    print("\n" + "\n".join(f"  {name:<28} {'PASS' if ok else 'FAIL'}" for name, ok in checks.items()))
     return 0 if all(checks.values()) else 1
 
 

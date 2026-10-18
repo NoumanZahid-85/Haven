@@ -21,7 +21,7 @@ def test_health_reports_components(client):
     data = resp.json()
     assert data["db"] == "connected"
     assert data["status"] in ("ok", "degraded")
-    assert set(data) == {"status", "db", "redis", "voice", "knowledge"}
+    assert set(data) == {"status", "db", "redis", "live", "pipeline", "knowledge"}
 
 
 def test_chat_turn_is_persisted_and_shows_in_insights(client, monkeypatch):
@@ -39,7 +39,8 @@ def test_chat_turn_is_persisted_and_shows_in_insights(client, monkeypatch):
 
     insights = client.get("/api/v1/insights").json()
     assert insights["volume"]["turns"] == before + 1
-    assert set(insights["latency_ms"]) == {"stt", "llm_first_token", "first_audio", "full_turn"}
+    assert set(insights["latency_ms"]) == {"live", "pipeline"}
+    assert set(insights["latency_ms"]["live"]) == {"end_of_turn", "llm_first_token", "first_audio", "full_turn"}
 
 
 def test_crisis_chat_returns_helpline(client):

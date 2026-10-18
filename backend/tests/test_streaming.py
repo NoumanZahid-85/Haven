@@ -1,11 +1,10 @@
-"""Token stream → speakable sentences → TTS-sized pieces."""
+"""Token stream → speakable sentences."""
 
 from __future__ import annotations
 
 import pytest
 
 from app.services.companion import sentences
-from app.voice.ws_session import TTS_CHAR_LIMIT, _split_for_tts
 
 
 async def _stream(*parts: str):
@@ -35,14 +34,3 @@ async def test_run_on_sentence_is_cut_without_waiting_for_a_period():
     out = await _collect(long)
     assert len(out) > 1
     assert all(len(s) <= 171 for s in out)
-
-
-def test_split_for_tts_respects_char_limit():
-    sentence = "word, " * 60
-    pieces = _split_for_tts(sentence)
-    assert all(len(p) <= TTS_CHAR_LIMIT + 1 for p in pieces)
-    assert " ".join(pieces).replace(" ", "") == sentence.replace(" ", "")
-
-
-def test_short_sentence_is_one_piece():
-    assert _split_for_tts("Hello there.") == ["Hello there."]

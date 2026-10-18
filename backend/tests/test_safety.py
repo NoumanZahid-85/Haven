@@ -54,3 +54,23 @@ def test_output_guardrail_replaces_unsafe_sentences(sentence):
 def test_output_guardrail_passes_normal_sentences():
     sentence = "That sounds really heavy. What's been on your mind most tonight?"
     assert screen_output(sentence) == (sentence, False)
+
+
+@pytest.mark.parametrize("text", [
+    "Ich will nicht mehr leben",
+    "Ich will mich umbringen",
+    "Ohne mich wären alle besser dran",
+    "Ich denke an Suizid",
+])
+def test_german_crisis_language_is_caught(text):
+    assert screen_input(text) is Risk.CRISIS
+
+
+@pytest.mark.parametrize("text", ["Ich würde mich nie umbringen", "Ich kann nicht mehr", "Ich fühle mich so wertlos"])
+def test_german_distress_is_elevated(text):
+    assert screen_input(text) is Risk.ELEVATED
+
+
+def test_german_output_guardrail_uses_german_line():
+    safe, replaced = screen_output("Du hast wahrscheinlich eine Depression.", "de")
+    assert replaced and "Ärztin" in safe

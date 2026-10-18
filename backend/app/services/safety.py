@@ -49,6 +49,18 @@ _CRISIS_PATTERNS = [
     r"\bself[- ]?harm",
     r"\boverdose\b",
     r"\btak(e|ing) all (of )?(my|the|these) (pills|tablets|meds)\b",
+    # German
+    r"\b(mich|mir das leben) (umbringen|nehmen)\b",
+    r"\bumbringen\b",
+    r"\bselbstmord",
+    r"\bsuizid",
+    # German word order moves the verb ("ehrlich gesagt will ich nicht mehr leben"),
+    # so match the phrase itself rather than a fixed verb position.
+    r"\bnicht mehr (leben|da sein|aufwachen)\b",
+    r"\b(will|möchte) (\w+ ){0,3}(sterben|tot sein)\b",
+    r"\bmein leben beenden\b",
+    r"\bmich (ritzen|selbst verletzen)\b",
+    r"\b(alle|ohne mich) besser dran\b",
 ]
 
 _ELEVATED_PATTERNS = [
@@ -64,9 +76,18 @@ _ELEVATED_PATTERNS = [
     r"\bgive up on everything\b",
     r"\bdisappear\b",
     r"\bpanic attack\b",
+    # German
+    r"\bhoffnungslos\b",
+    r"\bwertlos\b",
+    r"\bich kann nicht mehr\b",
+    r"\b(alles|es ist alles) sinnlos\b",
+    r"\beine last\b",
+    r"\bleer (innen|in mir)\b",
+    r"\bpanikattacke\b",
+    r"\b(keiner|niemand) würde mich vermissen\b",
 ]
 
-_NEGATION = re.compile(r"\b(not|never|n'?t|no longer|wouldn'?t|won'?t)\b[\w\s']{0,20}$")
+_NEGATION = re.compile(r"\b(not|never|n'?t|no longer|wouldn'?t|won'?t|nie|niemals|nicht|kein)\b[\w\s']{0,20}$")
 
 _CRISIS_RE = [re.compile(p, re.IGNORECASE) for p in _CRISIS_PATTERNS]
 _ELEVATED_RE = [re.compile(p, re.IGNORECASE) for p in _ELEVATED_PATTERNS]
@@ -97,6 +118,20 @@ CRISIS_RESPONSE = (
     "I'm here with you while you reach out. Are you safe right now?"
 )
 
+CRISIS_RESPONSE_DE = (
+    "Ich bin wirklich froh, dass du mir das erzählst, und ich nehme es ernst. "
+    "Du verdienst jetzt Unterstützung von einem echten Menschen. "
+    "Wenn du in Gefahr bist, ruf bitte sofort den Notruf 112 an. "
+    "Die TelefonSeelsorge erreichst du rund um die Uhr kostenlos unter 0800 111 0 111 oder 0800 111 0 222. "
+    "In anderen Ländern findest du auf findahelpline.com eine kostenlose Nummer. "
+    "Ich bin hier bei dir, während du anrufst. Bist du gerade in Sicherheit?"
+)
+
+
+def crisis_response(lang: str = "en") -> str:
+    return CRISIS_RESPONSE_DE if lang == "de" else CRISIS_RESPONSE
+
+
 ELEVATED_GUIDANCE = (
     "The user may be in significant distress. Slow down. Reflect what you heard "
     "with warmth, do not suggest techniques yet, and gently ask whether they are "
@@ -110,13 +145,19 @@ _OUTPUT_BLOCKLIST = [
                r"(depression|bipolar|ptsd|ocd|adhd|an? (anxiety|personality|eating) disorder)\b", re.IGNORECASE),
     re.compile(r"\bi(?:'m| am) (a|your) (therapist|psychologist|psychiatrist|doctor)\b", re.IGNORECASE),
     re.compile(r"\b(stop|increase|double) (taking )?your (medication|meds|pills)\b", re.IGNORECASE),
+    # German
+    re.compile(r"\bdu hast (wahrscheinlich |vermutlich )?(eine )?(depression|angststörung|ptbs|bipolare störung)\b",
+               re.IGNORECASE),
+    re.compile(r"\bich bin (dein|deine) (therapeut|therapeutin|psychologe|psychologin|arzt|ärztin)\b", re.IGNORECASE),
+    re.compile(r"\b(medikamente|tabletten) (absetzen|verdoppeln)\b", re.IGNORECASE),
 ]
 
 SAFE_REPLACEMENT = "That's something a doctor or therapist is the right person to help with."
+SAFE_REPLACEMENT_DE = "Dafür ist eine Ärztin, ein Arzt oder eine Therapeutin die richtige Ansprechperson."
 
 
-def screen_output(sentence: str) -> tuple[str, bool]:
+def screen_output(sentence: str, lang: str = "en") -> tuple[str, bool]:
     """Return (sentence to speak, was_replaced)."""
     if any(p.search(sentence) for p in _OUTPUT_BLOCKLIST):
-        return SAFE_REPLACEMENT, True
+        return (SAFE_REPLACEMENT_DE if lang == "de" else SAFE_REPLACEMENT), True
     return sentence, False

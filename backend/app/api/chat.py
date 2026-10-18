@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
     t0 = time.perf_counter()
-    convo = await companion.Conversation(session_id=req.session_id, user_id=req.user_id, channel="text").load()
+    convo = await companion.Conversation(session_id=req.session_id, user_id=req.user_id, channel="text", lang=req.lang).load()
     plan = await companion.plan_turn(convo, req.message)
     try:
         reply = " ".join([s async for s in companion.reply_stream(plan)])

@@ -36,10 +36,17 @@ FLUX_URL = "wss://api.deepgram.com/v2/listen"
 # with the eager signal ~0.5 s earlier, and the 1.5 s timeout bounds the worst
 # case. 0.5/0.3 was faster still but closed turns on a breath ("Honestly, …"),
 # which for a companion is worse than half a second of waiting.
-FLUX_PARAMS = (
-    "model=flux-general-en&encoding=linear16&sample_rate=16000"
-    "&eot_threshold=0.6&eager_eot_threshold=0.4&eot_timeout_ms=1500"
-)
+FLUX_PARAMS = "encoding=linear16&sample_rate=16000&eot_timeout_ms=1500"
+# English gets the English-tuned model; German (verified on real German speech)
+# needs the multilingual one, which closed German sentences early at the
+# English thresholds ("…so ein flaues" | "Gefühl im Magen"), so it waits longer.
+FLUX_MODELS = {"en": "flux-general-en", "de": "flux-general-multi"}
+FLUX_THRESHOLDS = {"en": "&eot_threshold=0.6&eager_eot_threshold=0.4", "de": "&eot_threshold=0.75&eager_eot_threshold=0.5"}
+GERMAN_VOICE = "aura-2-elara-de"
+
+
+def voice_for(lang: str) -> str:
+    return GERMAN_VOICE if lang == "de" else get_settings().tts_voice
 
 _client: httpx.AsyncClient | None = None
 
@@ -59,13 +66,13 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
-async def tts_stream(text: str, *, cache: bool = False) -> AsyncIterator[bytes]:
+async def tts_stream(text: str, *, cache: bool = False, voice: str | None = None) -> AsyncIterator[bytes]:
     """Yield PCM16 @24 kHz chunks for `text` as Deepgram produces them.
 
     Chunks are always an even number of bytes, so the client can view them
     as Int16 samples without a carry-over byte.
     """
-    voice = get_settings().tts_voice
+    voice = voice or get_settings().tts_voice
     if cache and (hit := _cache.get((voice, text))) is not None:
         _cache.move_to_end((voice, text))
         yield hit
@@ -136,12 +143,15 @@ async def warm() -> None:
 class FluxSTT:
     """One Flux streaming-recognition socket per voice session."""
 
-    def __init__(self) -> None:
+    def __init__(self, lang: str = "en") -> None:
         self._ws: websockets.ClientConnection | None = None
+        self.model = FLUX_MODELS.get(lang, FLUX_MODELS["en"])
+        self.thresholds = FLUX_THRESHOLDS.get(lang, FLUX_THRESHOLDS["en"])
 
     async def connect(self) -> None:
         self._ws = await websockets.connect(
-            f"{FLUX_URL}?{FLUX_PARAMS}", additional_headers=_headers(), max_size=None, open_timeout=10
+            f"{FLUX_URL}?model={self.model}&{FLUX_PARAMS}{self.thresholds}",
+            additional_headers=_headers(), max_size=None, open_timeout=10,
         )
 
     async def send(self, pcm16: bytes) -> None:

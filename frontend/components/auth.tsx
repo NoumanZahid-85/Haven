@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { EnvelopeSimple, LockKey, UserCircle, Leaf } from "@phosphor-icons/react";
+import { EnvelopeSimple, LockKey, UserCircle } from "@phosphor-icons/react";
 import {
   authConfigured,
   getOrCreateGuestId,
@@ -282,20 +282,11 @@ export function LoginScreen({
         className="panel"
         style={{ width: "100%", maxWidth: 400, padding: "30px 28px", zIndex: 1 }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <Leaf size={24} color="var(--signal)" weight="fill" />
-          <strong
-            style={{
-              fontSize: 17,
-              letterSpacing: "0.08em",
-              color: "var(--text-hi)",
-            }}
-          >
-            HAVEN
-          </strong>
-        </div>
-        <p style={{ color: "var(--text-mid)", fontSize: 13.5, marginBottom: 18, lineHeight: 1.5 }}>
-          Sign in so Haven can remember your conversations — privately, and only for you.
+        <p className="wordmark" style={{ fontSize: 30, marginBottom: 8 }}>
+          Haven
+        </p>
+        <p style={{ color: "var(--text-mid)", fontSize: 15, marginBottom: 20, lineHeight: 1.5 }}>
+          Sign in so Haven can remember your conversations, privately and only for you.
         </p>
 
         <div role="tablist" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -392,7 +383,7 @@ export function LoginScreen({
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0 14px" }}>
           <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
-          <span className="label-mono">or</span>
+          <span style={{ color: "var(--text-low)", fontSize: 14 }}>or</span>
           <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
         </div>
 
@@ -403,10 +394,10 @@ export function LoginScreen({
             width: "100%",
             padding: "10px 0",
             borderRadius: "var(--r-md)",
-            border: "1px dashed var(--line-strong)",
+            border: "1px solid var(--line-strong)",
             background: "transparent",
             color: "var(--text-hi)",
-            fontSize: 13,
+            fontSize: 15,
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -414,25 +405,23 @@ export function LoginScreen({
             gap: 7,
           }}
         >
-          <UserCircle size={16} weight="duotone" color="var(--signal)" />
-          Continue as Guest
-          <span style={{ color: "var(--text-low)" }}>(developer mode)</span>
+          <UserCircle size={18} weight="duotone" color="var(--signal)" />
+          Continue without an account
         </button>
         <p
           style={{
-            fontSize: 11.5,
+            fontSize: 14,
             color: "var(--text-mid)",
-            margin: "12px 0 0",
+            margin: "14px 0 0",
             lineHeight: 1.55,
           }}
         >
-          Guests get a private, browser-local ID — what Haven remembers stays in this browser
-          and is not linked to an email. Sign in to keep your memory across devices. You can
-          review or erase it anytime from the Memory page.
+          Without an account, Haven&apos;s notes stay in this browser only. Sign in to keep them
+          across devices. Either way, you can read or erase them on the Memory page.
         </p>
         {!authConfigured() && (
           <p className="label-mono" style={{ marginTop: 10 }}>
-            Email login disabled — server env NEXT_PUBLIC_SUPABASE_* not set
+            Email sign-in isn&apos;t set up on this deployment.
           </p>
         )}
       </div>

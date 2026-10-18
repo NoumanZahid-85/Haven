@@ -1,59 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChartLineUp, ArrowClockwise } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import type { Insights, Percentiles } from "@/lib/types";
-import { ErrorPanel, LoadingRows, PageHeader, SectionHeader } from "@/app/components/ui";
+import type { Insights, ModeLatency, VoiceMode } from "@/lib/types";
+import { ErrorNotice, Loading, PageHeading } from "@/app/components/ui";
 import { formatMs } from "@/lib/format";
 
-const STAGES: { key: keyof Insights["latency_ms"]; label: string; note: string }[] = [
-  { key: "stt", label: "Speech-to-text", note: "end of speech → transcript" },
-  { key: "llm_first_token", label: "LLM first token", note: "prompt sent → first token" },
-  { key: "first_audio", label: "First audio", note: "end of speech → first sound" },
-  { key: "full_turn", label: "Full turn", note: "end of speech → last audio sent" },
+const STAGES: { key: keyof ModeLatency; label: string }[] = [
+  { key: "end_of_turn", label: "Noticing you finished speaking" },
+  { key: "llm_first_token", label: "First word written by the model" },
+  { key: "first_audio", label: "First sound you hear" },
+  { key: "full_turn", label: "Whole reply delivered" },
 ];
 
+const MODE_NAMES: Record<VoiceMode, string> = { live: "Natural", pipeline: "Checked" };
+
 const QUALITY: { key: keyof Insights["quality"]; label: string }[] = [
-  { key: "overall", label: "Overall" },
   { key: "empathy", label: "Empathy" },
   { key: "safety", label: "Safety" },
   { key: "helpfulness", label: "Helpfulness" },
-  { key: "voice_fit", label: "Voice fit" },
+  { key: "voice_fit", label: "Sounds right spoken aloud" },
 ];
-
-function Stat({ value, label }: { value: string | number; label: string }) {
-  return (
-    <div className="panel" style={{ padding: "16px 18px" }}>
-      <div className="stat-number">{value}</div>
-      <div className="label-mono" style={{ marginTop: 6 }}>
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function LatencyRow({ label, note, p }: { label: string; note: string; p: Percentiles }) {
-  return (
-    <div className="insight-row">
-      <div>
-        <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{label}</div>
-        <div className="mono-id" style={{ fontSize: "0.66rem" }}>
-          {note}
-        </div>
-      </div>
-      <div className="insight-values">
-        <span>
-          p50 <strong>{formatMs(p.p50)}</strong>
-        </span>
-        <span>
-          p95 <strong>{formatMs(p.p95)}</strong>
-        </span>
-        <span className="mono-id">n={p.n}</span>
-      </div>
-    </div>
-  );
-}
 
 export default function InsightsPage() {
   const [data, setData] = useState<Insights | null>(null);
@@ -70,75 +37,131 @@ export default function InsightsPage() {
       ),
     [],
   );
-  const load = () => void fetchInsights();
 
   useEffect(() => {
     void fetchInsights();
   }, [fetchInsights]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", minWidth: 0 }}>
-      <PageHeader
-        icon={<ChartLineUp size={17} weight="duotone" />}
-        title="Insights"
-        subtitle="Measured from stored production turns"
-        actions={
-          <button className="btn-ghost btn-sm" onClick={load}>
-            <ArrowClockwise size={13} /> Refresh
-          </button>
-        }
+    <div className="page">
+      <PageHeading
+        title="How Haven is doing"
+        lede="Measured from real conversations: how fast Haven answers in each mode, how often the safety layer steps in, and how an AI reviewer scores the replies."
       />
-      <div className="scroll-area" style={{ flex: 1, padding: "24px clamp(16px, 4vw, 40px)" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", display: "grid", gap: 20 }}>
-          {error ? (
-            <ErrorPanel message={error} onRetry={load} />
-          ) : !data ? (
-            <LoadingRows count={5} />
+
+      {error ? (
+        <ErrorNotice message={error} onRetry={() => void fetchInsights()} />
+      ) : !data ? (
+        <Loading rows={5} />
+      ) : (
+        <>
+          <div className="big-figures">
+            <div>
+              <strong>{data.volume.conversations}</strong>
+              <span>conversations</span>
+            </div>
+            <div>
+              <strong>{data.volume.turns}</strong>
+              <span>replies</span>
+            </div>
+            <div>
+              <strong>{data.volume.turns_24h}</strong>
+              <span>replies today</span>
+            </div>
+            <div>
+              <strong>{data.volume.barge_ins}</strong>
+              <span>times someone interrupted</span>
+            </div>
+          </div>
+
+          <h2 className="section-title">Response time</h2>
+          <p className="footnote" style={{ marginBottom: 12 }}>
+            Timed from the moment you stop speaking. The typical case is the median; the slow case is the 95th
+            percentile.
+          </p>
+          <div className="table-scroll">
+            <table className="metric-table">
+              <thead>
+                <tr>
+                  <th scope="col">Stage</th>
+                  {(Object.keys(MODE_NAMES) as VoiceMode[]).map((m) => (
+                    <th key={m} scope="col" className="num">
+                      {MODE_NAMES[m]}: typical / slow
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {STAGES.map((s) => (
+                  <tr key={s.key}>
+                    <td>{s.label}</td>
+                    {(Object.keys(MODE_NAMES) as VoiceMode[]).map((m) => {
+                      const p = data.latency_ms[m]?.[s.key];
+                      return (
+                        <td key={m} className="num">
+                          {p && p.n ? `${formatMs(p.p50)} / ${formatMs(p.p95)}` : "Not measured"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <h2 className="section-title">Safety layer</h2>
+          <table className="metric-table">
+            <tbody>
+              <tr>
+                <td>
+                  <span className="risk-dot risk-none">Everyday conversation</span>
+                </td>
+                <td className="num">{data.safety.none ?? 0}</td>
+              </tr>
+              <tr>
+                <td>
+                  <span className="risk-dot risk-elevated">Signs of distress (Haven slowed down and checked in)</span>
+                </td>
+                <td className="num">{data.safety.elevated ?? 0}</td>
+              </tr>
+              <tr>
+                <td>
+                  <span className="risk-dot risk-crisis">Crisis (helplines given, model bypassed)</span>
+                </td>
+                <td className="num">{data.safety.crisis ?? 0}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2 className="section-title">Reply quality</h2>
+          {data.quality.evaluated_turns === 0 ? (
+            <p className="footnote">
+              No replies reviewed yet. Run <code>python -m scripts.evaluate production</code> to score recent ones.
+            </p>
           ) : (
             <>
-              <div className="stat-grid">
-                <Stat value={data.volume.turns} label="Turns" />
-                <Stat value={data.volume.conversations} label="Conversations" />
-                <Stat value={data.volume.users} label="People" />
-                <Stat value={data.volume.turns_24h} label="Turns · 24h" />
-                <Stat value={data.volume.barge_ins} label="Barge-ins" />
-              </div>
-
-              <div className="panel" style={{ overflow: "hidden" }}>
-                <SectionHeader label="Voice latency (most recent 1,000 voice turns)" />
-                {STAGES.map((s) => (
-                  <LatencyRow key={s.key} label={s.label} note={s.note} p={data.latency_ms[s.key]} />
-                ))}
-              </div>
-
-              <div className="two-col">
-                <div className="panel" style={{ overflow: "hidden" }}>
-                  <SectionHeader label="Safety tiers" />
-                  {(["none", "elevated", "crisis"] as const).map((r) => (
-                    <div key={r} className="insight-row">
-                      <span className={`risk-dot risk-${r}`}>{r}</span>
-                      <strong>{data.safety[r] ?? 0}</strong>
-                    </div>
-                  ))}
-                </div>
-                <div className="panel" style={{ overflow: "hidden" }}>
-                  <SectionHeader label={`LLM judge · ${data.quality.evaluated_turns} turns scored (1–5)`} />
-                  {QUALITY.map((q) => (
-                    <div key={q.key} className="insight-row">
-                      <span>{q.label}</span>
-                      <strong>{data.quality[q.key] ?? "—"}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <p className="mono-id" style={{ fontSize: "0.7rem", lineHeight: 1.6 }}>
-                Scores are written by <code>python -m scripts.evaluate production</code>; low scorers are promoted into
-                the regression suite that gates prompt and guardrail changes.
+              <p className="footnote" style={{ marginBottom: 12 }}>
+                {data.quality.evaluated_turns} replies scored from 1 to 5 by an AI reviewer. Overall average{" "}
+                <strong style={{ color: "var(--moon)" }}>{data.quality.overall}</strong>.
               </p>
+              <table className="metric-table">
+                <tbody>
+                  {QUALITY.map((q) => (
+                    <tr key={q.key}>
+                      <td>{q.label}</td>
+                      <td className="num">{data.quality[q.key] ?? "Not scored"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </>
           )}
-        </div>
-      </div>
+          <p className="footnote">
+            The lowest-scoring replies become test cases that every future change to Haven&apos;s instructions has to
+            pass.
+          </p>
+        </>
+      )}
     </div>
   );
 }

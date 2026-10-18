@@ -2,7 +2,7 @@
 // Pages name the data they want; this module owns URL construction,
 // HTTP error handling, timeouts, and JSON parsing.
 
-import type { ChatResponse, HealthData, Insights, MemoryResponse } from "./types";
+import type { ChatResponse, HealthData, Insights, MemoryResponse, VoiceMode } from "./types";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -105,9 +105,9 @@ export const api = {
   insights: () => fetchJSON<Insights>("/api/v1/insights", undefined, 20_000),
 
   voice: {
-    wsUrl: (sessionId: string, userId: string, bargeIn: boolean) => {
+    wsUrl: (mode: VoiceMode, sessionId: string, userId: string, bargeIn: boolean) => {
       const wsBase = BACKEND.replace(/^http/, "ws");
-      const params = new URLSearchParams({ session_id: sessionId, barge_in: bargeIn ? "1" : "0" });
+      const params = new URLSearchParams({ mode, session_id: sessionId, barge_in: bargeIn ? "1" : "0" });
       if (userId) params.set("user_id", userId);
       return `${wsBase}/api/v1/voice/ws?${params}`;
     },

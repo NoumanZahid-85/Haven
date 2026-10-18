@@ -1,17 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Brain, Trash, ArrowClockwise } from "@phosphor-icons/react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { useIdentity } from "@/components/auth";
-import { EmptyPanel, ErrorPanel, LoadingRows, PageHeader, SectionHeader } from "@/app/components/ui";
+import { EmptyNotice, ErrorNotice, Loading, PageHeading } from "@/app/components/ui";
 
 export default function MemoryPage() {
   const { identity } = useIdentity();
   const userId = identity?.customerId ?? "";
   const [facts, setFacts] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [forgetting, setForgetting] = useState(false);
+  const [erasing, setErasing] = useState(false);
 
   const fetchFacts = useCallback(
     () =>
@@ -24,72 +24,57 @@ export default function MemoryPage() {
       ),
     [userId],
   );
-  const load = () => void fetchFacts();
 
   useEffect(() => {
     if (userId) void fetchFacts();
   }, [userId, fetchFacts]);
 
-  const forget = async () => {
+  const erase = async () => {
     if (!window.confirm("Erase everything Haven remembers about you? This can't be undone.")) return;
-    setForgetting(true);
+    setErasing(true);
     try {
       await api.forget(userId);
       setFacts([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setForgetting(false);
+      setErasing(false);
     }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", minWidth: 0 }}>
-      <PageHeader
-        icon={<Brain size={17} weight="duotone" />}
-        title="Memory"
-        subtitle="What Haven carries between conversations"
-        actions={
-          <button className="btn-ghost btn-sm" onClick={load}>
-            <ArrowClockwise size={13} /> Refresh
-          </button>
-        }
+    <div className="page">
+      <PageHeading
+        title="What Haven remembers"
+        lede="After you talk, Haven keeps a few short notes, like the people in your life or what has helped before, so next time you don't start from zero. Only you can see them, and you can erase them anytime."
       />
-      <div className="scroll-area" style={{ flex: 1, padding: "24px clamp(16px, 4vw, 40px)" }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", display: "grid", gap: 18 }}>
-          <p style={{ color: "var(--text-mid)", fontSize: "0.9rem", lineHeight: 1.6 }}>
-            After each conversation, Haven saves a few short facts — people in your life, what you&apos;re working
-            through, what has helped — so next time you don&apos;t have to start from zero. It&apos;s yours: you can
-            see all of it here and erase it at any time.
-          </p>
 
-          {error ? (
-            <ErrorPanel message={error} onRetry={load} />
-          ) : facts === null ? (
-            <LoadingRows count={3} />
-          ) : facts.length === 0 ? (
-            <EmptyPanel title="Nothing remembered yet" message="Have a conversation on the Talk page and check back." />
-          ) : (
-            <div className="panel" style={{ overflow: "hidden" }}>
-              <SectionHeader
-                label={`${facts.length} remembered ${facts.length === 1 ? "fact" : "facts"}`}
-                right={
-                  <button className="btn-danger btn-sm" onClick={() => void forget()} disabled={forgetting}>
-                    <Trash size={13} /> Forget everything
-                  </button>
-                }
-              />
-              <ul style={{ listStyle: "none" }}>
-                {facts.map((f, i) => (
-                  <li key={i} className="memory-row">
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </div>
+      {error ? (
+        <ErrorNotice message={error} onRetry={() => void fetchFacts()} />
+      ) : facts === null ? (
+        <Loading />
+      ) : facts.length === 0 ? (
+        <EmptyNotice>
+          <strong>Nothing yet.</strong> Have a conversation on <Link href="/talk">Talk</Link> and your notes will appear
+          here.
+        </EmptyNotice>
+      ) : (
+        <>
+          <div className="row-between">
+            <p style={{ color: "var(--haze)" }}>
+              {facts.length} {facts.length === 1 ? "note" : "notes"}
+            </p>
+            <button className="btn-danger btn-sm" onClick={() => void erase()} disabled={erasing}>
+              {erasing ? "Erasing…" : "Erase all notes"}
+            </button>
+          </div>
+          <ul className="fact-list">
+            {facts.map((f, i) => (
+              <li key={i}>{f}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

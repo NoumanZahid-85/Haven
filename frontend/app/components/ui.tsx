@@ -1,154 +1,42 @@
-// UI kit — the shared primitives of the app design.
-// One implementation for the page chrome and the
-// loading / error / empty state trio, so pages compose instead of copy.
+// UI kit — the few shared pieces every page uses: a page heading and the
+// loading / error / empty trio, so pages compose instead of copy.
 
 "use client";
 
 import type { ReactNode } from "react";
-import { motion } from "motion/react";
-import { XCircle, ArrowClockwise, WarningCircle, Leaf } from "@phosphor-icons/react";
 
-// ── Page chrome ──────────────────────────────────────────────────────
-
-interface PageHeaderProps {
-  icon: ReactNode;
-  title: string;
-  subtitle?: ReactNode;
-  actions?: ReactNode;
-}
-
-/** The blurred console header: signal icon box + mono subtitle + actions. */
-export function PageHeader({ icon, title, subtitle, actions }: PageHeaderProps) {
+export function PageHeading({ title, lede }: { title: string; lede?: ReactNode }) {
   return (
-    <div
-      style={{
-        padding: "13px clamp(16px, 4vw, 28px)",
-        borderBottom: "1px solid var(--line)",
-        background: "var(--chrome)",
-        backdropFilter: "blur(12px)",
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 16,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-        <div className="icon-box">
-          {icon}
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <h1 style={{ fontSize: "0.98rem", fontWeight: 700, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
-            {title}
-          </h1>
-          {subtitle && (
-            <p className="mono-id" style={{ fontSize: "0.64rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {subtitle}
-            </p>
-          )}
-        </div>
-      </div>
-      {actions}
-    </div>
+    <>
+      <h1 className="page-title">{title}</h1>
+      {lede && <p className="page-lede">{lede}</p>}
+    </>
   );
 }
 
-// ── Loading / error / empty states ───────────────────────────────────
-
-export function LoadingRows({ count = 4 }: { count?: number }) {
+export function Loading({ rows = 3 }: { rows?: number }) {
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="shimmer" style={{ height: 52, borderRadius: "var(--r-md)" }} />
+    <div style={{ display: "grid", gap: 10 }} aria-busy="true" aria-label="Loading">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="shimmer" />
       ))}
     </div>
   );
 }
 
-interface StatePanelProps {
-  icon?: ReactNode;
-  title: string;
-  message?: ReactNode;
-  action?: ReactNode;
-}
-
-export function StatePanel({ icon, title, message, action }: StatePanelProps) {
+export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <motion.div
-      className="panel"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-      style={{ padding: 40, textAlign: "center", maxWidth: 560, margin: "40px auto" }}
-    >
-      {icon && <div style={{ marginBottom: 12 }}>{icon}</div>}
-      <div style={{ fontWeight: 650, marginBottom: 8 }}>{title}</div>
-      {message && <div style={{ color: "var(--text-mid)", fontSize: "0.875rem" }}>{message}</div>}
-      {action && <div style={{ marginTop: 18 }}>{action}</div>}
-    </motion.div>
-  );
-}
-
-export function ErrorPanel({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return (
-    <StatePanel
-      icon={<XCircle size={36} color="var(--danger)" weight="duotone" />}
-      title="Could not load data"
-      message={<p className="mono-id" style={{ fontSize: "0.74rem", marginTop: 8 }}>{message}</p>}
-      action={
-        onRetry && (
-          <button className="btn-primary" onClick={onRetry}>
-            <ArrowClockwise size={14} /> Retry
-          </button>
-        )
-      }
-    />
-  );
-}
-
-export function EmptyPanel({ title, message }: { title: string; message: ReactNode }) {
-  return (
-    <StatePanel
-      icon={<Leaf size={44} color="var(--text-low)" weight="duotone" />}
-      title={title}
-      message={message}
-    />
-  );
-}
-
-export function SectionHeader({ label, right }: { label: string; right?: ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "13px 20px",
-        borderBottom: "1px solid var(--line)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-      }}
-    >
-      <span className="label-mono">{label}</span>
-      {right}
+    <div className="notice notice-error" role="alert">
+      <p style={{ marginBottom: onRetry ? 12 : 0 }}>Couldn&apos;t reach the server: {message}</p>
+      {onRetry && (
+        <button className="btn-quiet btn-sm" onClick={onRetry}>
+          Try again
+        </button>
+      )}
     </div>
   );
 }
 
-export function WarningStrip({ children }: { children: ReactNode }) {
-  return (
-    <div
-      style={{
-        padding: "10px 20px",
-        borderTop: "1px solid var(--line)",
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        background: "rgba(255,112,112,0.05)",
-        color: "var(--danger)",
-        fontSize: "0.78rem",
-      }}
-    >
-      <WarningCircle size={15} weight="fill" />
-      <span>{children}</span>
-    </div>
-  );
+export function EmptyNotice({ children }: { children: ReactNode }) {
+  return <div className="notice">{children}</div>;
 }

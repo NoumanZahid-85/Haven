@@ -3,6 +3,9 @@
 
 export type Risk = "none" | "elevated" | "crisis";
 
+/** live: Gemini native speech-to-speech. pipeline: Deepgram Flux → Groq → Deepgram Aura-2. */
+export type VoiceMode = "live" | "pipeline";
+
 export interface ChatResponse {
   reply: string;
   risk: Risk;
@@ -14,7 +17,8 @@ export interface HealthData {
   status: "ok" | "degraded";
   db: string;
   redis: string;
-  voice: string;
+  live: string;
+  pipeline: string;
   knowledge: string;
 }
 
@@ -28,10 +32,17 @@ export interface Percentiles {
   n: number;
 }
 
+export interface ModeLatency {
+  end_of_turn: Percentiles;
+  llm_first_token: Percentiles;
+  first_audio: Percentiles;
+  full_turn: Percentiles;
+}
+
 export interface Insights {
   volume: { turns: number; conversations: number; users: number; turns_24h: number; barge_ins: number };
   safety: Partial<Record<Risk, number>>;
-  latency_ms: { stt: Percentiles; llm_first_token: Percentiles; first_audio: Percentiles; full_turn: Percentiles };
+  latency_ms: Record<VoiceMode, ModeLatency>;
   quality: {
     evaluated_turns: number;
     overall: number | null;

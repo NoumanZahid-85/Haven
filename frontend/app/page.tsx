@@ -58,8 +58,8 @@ export default function Landing() {
           <h2>What happens when you talk</h2>
           <div className="body">
             <p>
-              Tap the light and say what&apos;s on your mind. Haven usually starts answering within about a second and a
-              half of you finishing, in a calm voice, a sentence or two at a time. If you want to cut in, turn on{" "}
+              Tap the light and say what&apos;s on your mind. Haven usually starts answering within about two seconds of
+              you finishing, in a calm voice, a sentence or two at a time. If you want to cut in, turn on{" "}
               <strong>Let me interrupt</strong> and just start talking. It stops and listens.
             </p>
             <p>

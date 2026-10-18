@@ -1,30 +1,30 @@
-# Render Blueprint for VoiceSell AI
-# Deploy: push to main and Render auto-creates the services from this file.
+# Render Blueprint for Haven — Postgres + Redis + backend + frontend.
+# New → Blueprint → select this repo, then set the `sync: false` secrets.
 
 databases:
-  - name: voicesell-postgres
+  - name: haven-postgres
     plan: free
     region: frankfurt
-    databaseName: voicesell
-    user: voicesell
+    databaseName: haven
+    user: haven
     ipAllowList:
       - source: 0.0.0.0/0
         description: everywhere
 
 services:
   - type: keyvalue
-    name: voicesell-redis
+    name: haven-redis
     plan: free
     region: frankfurt
     maxmemoryPolicy: allkeys-lru
     ipAllowList:
       - source: 0.0.0.0/0
         description: everywhere
-  # ── Backend: FastAPI + Pipecat (Daily WebRTC) ─────────────────────
+
+  # ── Backend: FastAPI voice WebSocket (VAD → STT → LLM → TTS) ──────
   - type: web
-    name: voicesell-backend
+    name: haven-backend
     runtime: docker
-    repo: https://github.com/NoumanZahid-85/voicesell-ai
     plan: free
     region: frankfurt
     branch: master
@@ -35,54 +35,28 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: voicesell-postgres
+          name: haven-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
-          name: voicesell-redis
+          name: haven-redis
           type: keyvalue
           property: connectionString
-      # External services - set values in the dashboard at first deploy
-      - key: QDRANT_URL
-        sync: false
-      - key: QDRANT_API_KEY
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_KEY
-        sync: false
       - key: GROQ_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_BASE_URL
-        sync: false
-      - key: OPENAI_MODEL_NAME
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: DAILY_API_KEY
-        sync: false
-      - key: DEEPGRAM_API_KEY
-        sync: false
-      - key: CARTESIA_API_KEY
-        sync: false
-      - key: LANGSMITH_API_KEY
-        sync: false
-      - key: OTEL_EXPORTER_ENDPOINT
-        sync: false
       - key: APP_NAME
-        value: voicesell
+        value: Haven
       - key: DEBUG
         value: "false"
       - key: LOG_LEVEL
         value: info
 
-  # ── Frontend: Next.js broadcast-console UI ─────────────────────
+  # ── Frontend: Next.js ──────────────────────────────────────────────
   - type: web
-    name: voicesell-frontend
+    name: haven-frontend
     runtime: node
-    repo: https://github.com/NoumanZahid-85/voicesell-ai
     plan: free
     region: frankfurt
     branch: master
@@ -90,14 +64,10 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
-      # NOTE: Render's fromService property only exposes bare host (no scheme),
-      # but this var is consumed as a full URL (see frontend/lib/api.ts) — must be a literal.
-      # Must match the backend service's actual onrender.com URL exactly.
+      # Full URL of the backend service (baked in at build time).
       - key: NEXT_PUBLIC_BACKEND_URL
-        value: https://voicesell-backend.onrender.com
-      # Supabase email/password login. Fill these in the Render dashboard
-      # (Settings > API in Supabase -> Project URL + anon public key).
-      # Left empty, the app runs in guest-only mode with no login screen.
+        value: https://haven-backend.onrender.com
+      # Optional Supabase email/password login; omit for guest-only mode.
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY

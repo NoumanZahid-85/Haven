@@ -1,4 +1,4 @@
-# VoiceSell AI
+# Haven
 
 # Python / uv
 __pycache__/
@@ -50,5 +50,10 @@ frontend/.next/
 frontend/out/
 docs/adr/*.md
 backend/test_out.txt
-Voice_Chatbot_15Day_Plan.docx
-VoiceSell_Project_Report.docx
+# Personal documents
+*.docx
+# Local databases / scratch
+backend/*.db
+
+# Personal notes (not part of the deliverable)
+VIDEO_SCRIPT.md

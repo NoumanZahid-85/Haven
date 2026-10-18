@@ -34,7 +34,7 @@ Haven runs two complete real-time voice architectures behind the same WebSocket,
 | How it works | Native speech-to-speech: one model hears and speaks | Streaming STT → LLM → per-sentence TTS |
 | Stack | Gemini 3.1 Flash Live | Deepgram Flux → Groq `gpt-oss-120b` → Deepgram Aura-2 |
 | Turn-taking | Gemini activity detection + interruption judge | Flux semantic end-of-turn + speculative replies + interruption judge |
-| First audio after you stop speaking* | **1.6–1.7 s** | **1.8–1.9 s** |
+| First audio after you stop speaking* | **1.6–1.7 s** | **1.8–2.1 s** |
 | Safety | Live transcripts screened; model muted and overridden on risk | Every sentence screened *before* it is spoken |
 | Best at | Prosody, tone, feeling human | Control, auditability, guarantees |
 

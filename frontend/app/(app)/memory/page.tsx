@@ -30,7 +30,7 @@ export default function MemoryPage() {
   }, [userId, fetchFacts]);
 
   const erase = async () => {
-    if (!window.confirm("Erase everything Haven remembers about you? This can't be undone.")) return;
+    if (!window.confirm("Erase everything Haven remembers about you, including your saved wins? This can't be undone.")) return;
     setErasing(true);
     try {
       await api.forget(userId);

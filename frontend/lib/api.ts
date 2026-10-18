@@ -2,7 +2,7 @@
 // Pages name the data they want; this module owns URL construction,
 // HTTP error handling, timeouts, and JSON parsing.
 
-import type { ChatResponse, HealthData, Insights, MemoryResponse, VoiceMode } from "./types";
+import type { ChatResponse, HealthData, Insights, Journey, Lang, MemoryResponse, Takeaway, VoiceMode } from "./types";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -91,12 +91,22 @@ async function send(path: string, init?: RequestInit): Promise<void> {
 export const api = {
   health: () => fetchJSON<HealthData>("/health", undefined, 15_000, true), // retry once — cold-start can take ~14s
 
-  chat: (message: string, sessionId: string, userId?: string) =>
+  chat: (message: string, sessionId: string, userId: string, lang: Lang) =>
     fetchJSON<ChatResponse>("/api/v1/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, session_id: sessionId, user_id: userId ?? "" }),
+      body: JSON.stringify({ message, session_id: sessionId, user_id: userId, lang }),
     }),
+
+  takeaway: (sessionId: string, userId: string, lang: Lang) =>
+    fetchJSON<Takeaway>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/takeaway?${new URLSearchParams({ user_id: userId, lang })}`,
+      { method: "POST" },
+      45_000,
+      false,
+    ),
+
+  journey: (userId: string) => fetchJSON<Journey>(`/api/v1/journey/${encodeURIComponent(userId)}`),
 
   memory: (userId: string) => fetchJSON<MemoryResponse>(`/api/v1/memory/${encodeURIComponent(userId)}`),
 
@@ -105,9 +115,9 @@ export const api = {
   insights: () => fetchJSON<Insights>("/api/v1/insights", undefined, 20_000),
 
   voice: {
-    wsUrl: (mode: VoiceMode, sessionId: string, userId: string, bargeIn: boolean) => {
+    wsUrl: (mode: VoiceMode, lang: Lang, sessionId: string, userId: string, bargeIn: boolean) => {
       const wsBase = BACKEND.replace(/^http/, "ws");
-      const params = new URLSearchParams({ mode, session_id: sessionId, barge_in: bargeIn ? "1" : "0" });
+      const params = new URLSearchParams({ mode, lang, session_id: sessionId, barge_in: bargeIn ? "1" : "0" });
       if (userId) params.set("user_id", userId);
       return `${wsBase}/api/v1/voice/ws?${params}`;
     },

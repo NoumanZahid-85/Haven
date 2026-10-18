@@ -6,6 +6,7 @@ import { AuthGate, useIdentity } from "@/components/auth";
 
 const NAV = [
   { href: "/talk", label: "Talk" },
+  { href: "/journey", label: "Journey" },
   { href: "/memory", label: "Memory" },
   { href: "/insights", label: "Insights" },
 ];

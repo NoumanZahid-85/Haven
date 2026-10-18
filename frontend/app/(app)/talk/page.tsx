@@ -1,10 +1,11 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Microphone, PaperPlaneRight, Stop, Lifebuoy } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { useIdentity } from "@/components/auth";
-import type { Risk, TurnMetrics, VoiceMode } from "@/lib/types";
+import type { Heard, Lang, Risk, Takeaway, TurnMetrics, VoiceMode } from "@/lib/types";
 import { formatMs, formatTime } from "@/lib/format";
 
 type VoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
@@ -40,8 +41,26 @@ const STATE_TEXT: Record<VoiceState, string> = {
   error: "Can't connect right now",
 };
 
+const LANGS: { id: Lang; label: string }[] = [
+  { id: "en", label: "English" },
+  { id: "de", label: "Deutsch" },
+];
+
+const HEARD_TEXT: Record<Heard["reason"], string> = {
+  backchannel: "kept talking",
+  echo: "that was my own voice, kept talking",
+  "stop-phrase": "stopped to listen",
+  takeover: "stopped to listen",
+};
+
 const OUT_RATE = 24000;
-const STORE = { session: "haven:session-id", messages: "haven:messages", mode: "haven:mode", bargeIn: "haven:barge-in" };
+const STORE = {
+  session: "haven:session-id",
+  messages: "haven:messages",
+  mode: "haven:mode",
+  lang: "haven:lang",
+  bargeIn: "haven:barge-in",
+};
 
 function readStore(key: string): string | null {
   try {
@@ -106,7 +125,13 @@ export default function TalkPage() {
   const [mode, setMode] = useState<VoiceMode>(() =>
     typeof window !== "undefined" && readStore(STORE.mode) === "pipeline" ? "pipeline" : "live",
   );
-  const [bargeIn, setBargeIn] = useState(() => typeof window !== "undefined" && readStore(STORE.bargeIn) === "1");
+  const [lang, setLang] = useState<Lang>(() =>
+    typeof window !== "undefined" && readStore(STORE.lang) === "de" ? "de" : "en",
+  );
+  // On by default: the interruption judge ignores "mm-hmm" and Haven's own echo.
+  const [bargeIn, setBargeIn] = useState(() => typeof window === "undefined" || readStore(STORE.bargeIn) !== "0");
+  const [heard, setHeard] = useState<Heard | null>(null);
+  const [takeaway, setTakeaway] = useState<Takeaway | "loading" | null>(null);
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [risk, setRisk] = useState<Risk>("none");
@@ -126,6 +151,9 @@ export default function TalkPage() {
   });
 
   const lampRef = useRef<HTMLButtonElement>(null);
+  const voiceSessionRef = useRef<string | null>(null);
+  const turnsRef = useRef(0); // user turns in the current voice session
+  const heardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -241,7 +269,15 @@ export default function TalkPage() {
     teardown();
     setState("idle");
     setPartial("");
-  }, [teardown]);
+    const voiceSession = voiceSessionRef.current;
+    if (voiceSession && turnsRef.current > 0) {
+      setTakeaway("loading");
+      // Give the server a moment to store the last turn before summing up.
+      setTimeout(() => {
+        api.takeaway(voiceSession, userId, lang).then(setTakeaway, () => setTakeaway(null));
+      }, 1500);
+    }
+  }, [teardown, userId, lang]);
 
   const start = useCallback(async () => {
     setError(null);
@@ -262,7 +298,11 @@ export default function TalkPage() {
     ctxRef.current = ctx;
     playEndRef.current = ctx.currentTime;
 
-    const ws = new WebSocket(api.voice.wsUrl(mode, `${sessionId}-${Date.now().toString(36)}`, userId, bargeIn));
+    const voiceSession = `${sessionId}-${Date.now().toString(36)}`;
+    voiceSessionRef.current = voiceSession;
+    turnsRef.current = 0;
+    setTakeaway(null);
+    const ws = new WebSocket(api.voice.wsUrl(mode, lang, voiceSession, userId, bargeIn));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
@@ -286,6 +326,7 @@ export default function TalkPage() {
           break;
         case "transcript":
           if (msg.text) push({ role: "user", text: msg.text });
+          turnsRef.current += 1;
           setPartial("");
           setState("thinking");
           break;
@@ -316,6 +357,11 @@ export default function TalkPage() {
           break;
         case "risk":
           if (msg.level === "crisis") setRisk("crisis");
+          break;
+        case "heard":
+          setHeard(msg as unknown as Heard);
+          if (heardTimer.current) clearTimeout(heardTimer.current);
+          heardTimer.current = setTimeout(() => setHeard(null), 3000);
           break;
         case "error":
           setError(msg.message ?? "Something went wrong with the voice connection.");
@@ -349,7 +395,7 @@ export default function TalkPage() {
     source.connect(processor);
     processor.connect(mute);
     mute.connect(ctx.destination);
-  }, [mode, sessionId, userId, bargeIn, playChunk, push, patchLastAgent, scheduleFinish, stopPlayback]);
+  }, [mode, lang, sessionId, userId, bargeIn, playChunk, push, patchLastAgent, scheduleFinish, stopPlayback]);
 
   useEffect(() => teardown, [teardown]);
 
@@ -361,7 +407,7 @@ export default function TalkPage() {
     push({ role: "user", text });
     setSending(true);
     try {
-      const data = await api.chat(text, sessionId, userId);
+      const data = await api.chat(text, sessionId, userId, lang);
       if (data.risk === "crisis") setRisk("crisis");
       push({ role: "agent", text: data.reply });
     } catch (err) {
@@ -369,7 +415,7 @@ export default function TalkPage() {
     } finally {
       setSending(false);
     }
-  }, [input, sending, sessionId, userId, push]);
+  }, [input, sending, sessionId, userId, lang, push]);
 
   const live = state !== "idle" && state !== "error";
   const current = MODES.find((m) => m.id === mode)!;
@@ -415,7 +461,24 @@ export default function TalkPage() {
               </button>
             ))}
           </div>
-          <label className="toggle" title="Best with headphones, so Haven doesn't hear itself">
+          <div role="radiogroup" aria-label="Language" style={{ display: "flex", gap: 8 }}>
+            {LANGS.map((l) => (
+              <button
+                key={l.id}
+                className="pill"
+                role="radio"
+                aria-checked={lang === l.id}
+                disabled={live}
+                onClick={() => {
+                  setLang(l.id);
+                  writeStore(STORE.lang, l.id);
+                }}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+          <label className="toggle" title="Haven ignores a quick 'mm-hmm' and its own voice. Headphones still help.">
             <input
               type="checkbox"
               checked={bargeIn}
@@ -429,7 +492,11 @@ export default function TalkPage() {
             Let me interrupt
           </label>
         </div>
-        <p className="mode-hint">{current.hint}</p>
+        <p className="mode-hint">
+          {lang === "de" && mode === "pipeline"
+            ? "German in Checked mode is in beta and can mishear words. Natural understands German best."
+            : current.hint}
+        </p>
 
         <button
           ref={lampRef}
@@ -445,6 +512,11 @@ export default function TalkPage() {
         <p className="lamp-sub">{sub}</p>
 
         {error && <p className="talk-error">{error}</p>}
+        {heard && (
+          <p className="latency">
+            Heard &ldquo;{heard.text}&rdquo;, {HEARD_TEXT[heard.reason]}
+          </p>
+        )}
 
         {live && (
           <p className={`live-caption ${partial ? "live-caption-user" : ""}`}>
@@ -461,6 +533,34 @@ export default function TalkPage() {
           </p>
         )}
       </section>
+
+      {takeaway && (
+        <section className="takeaway" aria-live="polite">
+          {takeaway === "loading" ? (
+            <p className="takeaway-loading">Writing down what you talked about…</p>
+          ) : (
+            <>
+              <h2 className="takeaway-title">Before you go</h2>
+              <p className="takeaway-summary">{takeaway.summary}</p>
+              {takeaway.mood_start && takeaway.mood_end && (
+                <p className="takeaway-mood">
+                  You came in <strong>{takeaway.mood_start}</strong> and you&apos;re leaving{" "}
+                  <strong>{takeaway.mood_end}</strong>.
+                </p>
+              )}
+              {takeaway.next_step && (
+                <div className="takeaway-step">
+                  <span>One step for tomorrow</span>
+                  <p>{takeaway.next_step}</p>
+                </div>
+              )}
+              <Link href="/journey" className="takeaway-link">
+                Saved to your Journey
+              </Link>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="thread" aria-label="Conversation">
         {messages.some((m) => m.text) && <h2 className="thread-title">This conversation</h2>}

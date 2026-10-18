@@ -59,8 +59,8 @@ export default function Landing() {
           <div className="body">
             <p>
               Tap the light and say what&apos;s on your mind. Haven usually starts answering within about two seconds of
-              you finishing, in a calm voice, a sentence or two at a time. If you want to cut in, turn on{" "}
-              <strong>Let me interrupt</strong> and just start talking. It stops and listens.
+              you finishing, in a calm voice, a sentence or two at a time. You can talk over it whenever you like: a
+              quick &ldquo;mm-hmm&rdquo; won&apos;t stop it, but &ldquo;wait&hellip;&rdquo; will, in under a second.
             </p>
             <p>
               When it fits, Haven offers one small thing to try, like a breathing pattern, a way to quiet racing
@@ -96,6 +96,24 @@ export default function Landing() {
                 <p className="stack-line">Deepgram Flux, then Groq, then Deepgram Aura-2</p>
               </div>
             </div>
+            <p>
+              Both modes speak <strong>English and German</strong>. For German, Natural understands you best.
+            </p>
+          </div>
+        </section>
+
+        <section className="prose-section">
+          <h2>When nothing feels like enough</h2>
+          <div className="body">
+            <p>
+              Some of the people awake at 2 a.m. look fine from the outside. They hit the target, closed the deal, and
+              felt nothing. Haven listens for the wins you skip past, keeps them, and brings them back when you need them.
+              Every one is on your <strong>Journey</strong> page.
+            </p>
+            <p>
+              When you hang up, Haven leaves you a short takeaway: what you talked through, how your mood moved, and one
+              small step you can take by tomorrow, not two weeks from now.
+            </p>
           </div>
         </section>
 

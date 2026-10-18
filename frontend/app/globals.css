@@ -747,3 +747,93 @@ button:disabled {
     transition: none !important;
   }
 }
+
+/* ─── Takeaway card (after hanging up) ─────────────────────────────── */
+.takeaway {
+  width: calc(100% - 32px);
+  max-width: 560px;
+  margin: 8px auto 0;
+  padding: 22px 24px;
+  border-radius: 20px;
+  background: var(--dusk);
+  border: 1px solid var(--rule-strong);
+  display: grid;
+  gap: 12px;
+}
+.takeaway-loading {
+  color: var(--haze);
+  text-align: center;
+}
+.takeaway-title {
+  font-size: 24px;
+}
+.takeaway-summary {
+  font-size: 17px;
+}
+.takeaway-mood {
+  color: var(--haze);
+}
+.takeaway-mood strong {
+  color: var(--moon);
+  font-weight: 700;
+}
+.takeaway-step {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--lamp-soft);
+  border: 1px solid rgba(244, 185, 119, 0.35);
+}
+.takeaway-step span {
+  font-size: 14px;
+  color: var(--lamp);
+}
+.takeaway-step p {
+  font-size: 17px;
+  margin-top: 2px;
+}
+.takeaway-link {
+  font-size: 14px;
+  color: var(--haze);
+}
+
+/* ─── Journey ──────────────────────────────────────────────────────── */
+.wins-list {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+.wins-list li {
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--dusk);
+  border-left: 3px solid var(--lamp);
+  font-size: 17px;
+}
+.wins-list time,
+.card-list time {
+  display: block;
+  font-size: 13px;
+  color: var(--haze-2);
+  margin-top: 4px;
+}
+.card-list {
+  list-style: none;
+  display: grid;
+  gap: 14px;
+}
+.card-list li {
+  padding: 18px 20px;
+  border-radius: 16px;
+  border: 1px solid var(--rule);
+  display: grid;
+  gap: 6px;
+}
+.card-list .mood {
+  font-size: 14px;
+  color: var(--haze);
+}
+.card-list .step {
+  font-size: 15px;
+  color: var(--lamp);
+}

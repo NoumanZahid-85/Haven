@@ -6,6 +6,31 @@ export type Risk = "none" | "elevated" | "crisis";
 /** live: Gemini native speech-to-speech. pipeline: Deepgram Flux → Groq → Deepgram Aura-2. */
 export type VoiceMode = "live" | "pipeline";
 
+export type Lang = "en" | "de";
+
+/** End-of-conversation card. */
+export interface Takeaway {
+  session_id: string;
+  summary: string;
+  mood_start: string;
+  mood_end: string;
+  next_step: string;
+  lang: Lang;
+  created_at: string | null;
+}
+
+export interface Journey {
+  takeaways: Takeaway[];
+  wins: { text: string; created_at: string | null }[];
+}
+
+/** What the interruption judge decided about words heard while Haven spoke. */
+export interface Heard {
+  text: string;
+  interrupt: boolean;
+  reason: "backchannel" | "echo" | "stop-phrase" | "takeover";
+}
+
 export interface ChatResponse {
   reply: string;
   risk: Risk;

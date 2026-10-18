@@ -30,8 +30,6 @@ from app.voice.deepgram import FluxSTT
 
 logger = logging.getLogger(__name__)
 
-GREETING = "Hi, I'm Haven. I'm here to listen, whatever's on your mind. How are you feeling right now?"
-GREETING_RETURNING = "Hi, it's good to hear from you again. How have things been since we last talked?"
 TURN_TIMEOUT_S = 45.0
 
 
@@ -56,7 +54,7 @@ class PipelineSession(VoiceBridge):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.stt = FluxSTT()
+        self.stt = FluxSTT(self.lang)
         self.reply: _Reply | None = None
         self.carry = ""  # words from a turn the user resumed before hearing a reply
         # Technique retrieval runs on the partial transcript while the user is
@@ -68,8 +66,10 @@ class PipelineSession(VoiceBridge):
     async def start(self) -> None:
         await self.stt.connect()
         self._events_task = asyncio.create_task(self._stt_loop())
-        greeting = GREETING_RETURNING if self.convo.facts else GREETING
-        self._greeting = asyncio.create_task(self.speak_text(greeting))
+        self._greeting = asyncio.create_task(self._greet())
+
+    async def _greet(self) -> None:
+        await self.speak_text(await companion.greeting(self.convo), cache=not self.convo.facts)
 
     async def stop(self) -> None:
         for task in (self._events_task, self._greeting, self.reply.task if self.reply else None):
@@ -96,6 +96,14 @@ class PipelineSession(VoiceBridge):
         if event != "Update":
             ms = self.energy.since_speech_ms()
             session_registry.record_event(self.session_id, f"flux_{event}", f"+{ms:.0f}ms {transcript[:50]}" if ms else "")
+        # While Haven has the floor, everything heard goes to the interruption
+        # judge first: "mm-hmm" and speaker echo must not cut it off, "wait"
+        # must, immediately.
+        if self.speaking and event in ("StartOfTurn", "Update", "EagerEndOfTurn", "EndOfTurn") and transcript:
+            if not (self.barge_in and self.judge_heard(transcript).interrupt):
+                return  # backchannel / echo / too short: keep talking, don't reply to it
+            await self._barge()
+
         if event == "StartOfTurn":
             deepgram.touch()
             await self._on_user_started()
@@ -112,26 +120,24 @@ class PipelineSession(VoiceBridge):
         elif event == "EndOfTurn" and transcript:
             await self._on_end_of_turn(self._with_carry(transcript))
 
+    async def _barge(self) -> None:
+        """The person is genuinely interrupting: stop speaking, keep listening."""
+        if self._greeting and not self._greeting.done():
+            self._greeting.cancel()
+        self._cancel_reply()
+        await self.interrupt()
+
     def _with_carry(self, transcript: str) -> str:
         return f"{self.carry} {transcript}".strip() if self.carry else transcript
 
     async def _on_user_started(self) -> None:
-        if self._greeting and not self._greeting.done() and self.barge_in:
-            self._greeting.cancel()
-            await self.interrupt()
         reply = self.reply
-        if reply is None or not reply.commit.is_set():
-            return
-        if reply.audible.is_set():
-            if self.barge_in and self.speaking:
-                session_registry.record_event(self.session_id, "barge_in", str(self.turn_no))
-                self._cancel_reply()
-                await self.interrupt()
-        else:
-            # Committed but nothing audible yet: the user is continuing their
-            # thought. Drop the reply and keep their words for the next turn.
-            self.carry = reply.text
-            self._cancel_reply()
+        if reply is None or not reply.commit.is_set() or reply.audible.is_set():
+            return  # audible replies are the interruption judge's call, not this one
+        # Committed but nothing audible yet: the user is continuing their
+        # thought. Drop the reply and keep their words for the next turn.
+        self.carry = reply.text
+        self._cancel_reply()
 
     async def _on_end_of_turn(self, text: str) -> None:
         # Transcript first: committing can release audio immediately, and the

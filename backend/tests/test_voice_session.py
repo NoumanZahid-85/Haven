@@ -46,7 +46,7 @@ async def _until(predicate, timeout: float = 2.0) -> None:
 
 @pytest.fixture(autouse=True)
 def fake_tts(monkeypatch):
-    async def tts(text: str, *, cache: bool = False):
+    async def tts(text: str, **_kwargs):
         yield b"\x01\x00" * 8  # one tiny PCM chunk per sentence
 
     monkeypatch.setattr(deepgram, "tts_stream", tts)
@@ -135,9 +135,39 @@ async def test_barge_in_interrupts_audible_reply(fake_llm, monkeypatch):
     await s.on_turn_event("EndOfTurn", "Tell me something")
     await _until(lambda: len(ws.audio()) == 1)
     await s.on_turn_event("StartOfTurn", "")
+    assert "interrupt" not in ws.events()  # a sound alone is not an interruption
+    await s.on_turn_event("Update", "Wait, hold on")
     await _until(lambda: "interrupt" in ws.events())
     assert s.reply is None
     assert "Never heard." not in ws.captions()
+
+
+@pytest.mark.asyncio
+async def test_backchannel_and_echo_do_not_interrupt(monkeypatch):
+    release = asyncio.Event()
+
+    async def slow_stream(messages):
+        yield "Try breathing in for four counts. "
+        await release.wait()
+        yield "Then out for six."
+
+    monkeypatch.setattr(companion, "llm_stream", slow_stream)
+    s, ws = pipeline(barge_in=True)
+    await s.on_turn_event("EndOfTurn", "Help me calm down")
+    await _until(lambda: len(ws.audio()) == 1)
+    replies_before = ws.events().count("speaking_start")
+
+    await s.on_turn_event("Update", "Mm-hmm")
+    await s.on_turn_event("EndOfTurn", "Mm-hmm.")
+    await s.on_turn_event("Update", "breathing in for four counts")  # Haven's own voice via the speakers
+    assert "interrupt" not in ws.events()
+    assert s.reply is not None  # still speaking
+    assert ws.events().count("speaking_start") == replies_before  # never answered "mm-hmm"
+    def reasons() -> set[str]:
+        return {m["reason"] for m in ws.sent if isinstance(m, dict) and m["type"] == "heard"}
+
+    await _until(lambda: reasons() >= {"backchannel", "echo"})
+    release.set()
 
 
 @pytest.mark.asyncio
@@ -237,3 +267,48 @@ async def test_live_barge_in_forwards_interrupt():
     await s.handle(msg(interrupted=True))
     assert ws.events()[-1] == "interrupt"
     assert not s.turn_open
+
+
+# ── Natural mode barge-in: silence to Gemini, judged side channel, replay ──
+
+
+class FakeGeminiSession:
+    def __init__(self) -> None:
+        self.audio: list[bytes] = []
+
+    async def send_realtime_input(self, *, audio) -> None:
+        self.audio.append(audio.data)
+
+
+class FakeFlux:
+    def __init__(self) -> None:
+        self.audio: list[bytes] = []
+
+    async def send(self, pcm: bytes) -> None:
+        self.audio.append(pcm)
+
+
+@pytest.mark.asyncio
+async def test_live_barge_in_hands_buffered_words_to_gemini():
+    s, ws = live()
+    s.session = FakeGeminiSession()
+    s._flux = FakeFlux()
+    await s.handle(msg(heard="hello"))
+    await s.handle(msg(audio=b"\x00\x01" * 4, said="So one thing you could try"))
+    assert s.speaking
+
+    voice = b"\x10\x27" * 800  # 50 ms of loud audio
+    await s.on_audio(voice)
+    assert s.session.audio[-1] == bytes(len(voice))  # Gemini hears silence while Haven speaks
+    assert s._flux.audio[-1] == voice  # the judge's side channel hears the real mic
+
+    assert s.judge_heard("mm-hmm").interrupt is False
+    assert "interrupt" not in ws.events()
+
+    await s._barge()
+    assert ws.events()[-1] == "interrupt"
+    assert s.session.audio[-1] == voice  # buffered words replayed to Gemini
+    await s.handle(msg(audio=b"\xff\xff" * 4, said="rest of the old reply"))
+    assert "rest of the old reply" not in ws.captions()  # cut-off generation is dropped
+    await s.handle(msg(interrupted=True))
+    assert not s.discarding

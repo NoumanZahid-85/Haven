@@ -36,7 +36,7 @@ from collections.abc import AsyncIterator
 import numpy as np
 
 from app.services import companion
-from app.voice import deepgram, session_registry
+from app.voice import barge, deepgram, session_registry
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +78,14 @@ async def _once(text: str) -> AsyncIterator[str]:
 class VoiceBridge:
     mode = "voice"
 
-    def __init__(self, ws, session_id: str, user_id: str = "", barge_in: bool = False) -> None:
+    def __init__(self, ws, session_id: str, user_id: str = "", barge_in: bool = True, lang: str = "en") -> None:
         self.ws = ws
         self.session_id = session_id
         self.barge_in = barge_in
-        self.convo = companion.Conversation(session_id=session_id, user_id=user_id, channel=self.mode)
+        self.lang = lang
+        self.voice = deepgram.voice_for(lang)
+        self.convo = companion.Conversation(session_id=session_id, user_id=user_id, channel=self.mode, lang=lang)
+        self.bot_said = ""  # what Haven has said this turn — the interruption judge's echo reference
         self.energy = EnergyTracker()
         self.turn_no = 0
         self.speaking = False  # bot audio is out and the client hasn't finished playing it
@@ -90,11 +93,11 @@ class VoiceBridge:
 
     # ── Lifecycle ──────────────────────────────────────────────────────
     async def run(self) -> None:
-        session_registry.record_event(self.session_id, "connected", f"{self.mode} barge_in={self.barge_in}")
+        session_registry.record_event(self.session_id, "connected", f"{self.mode} lang={self.lang} barge_in={self.barge_in}")
         await self.convo.load()
         try:
             await self.start()
-            await self.send_json({"type": "ready", "mode": self.mode, "barge_in": self.barge_in})
+            await self.send_json({"type": "ready", "mode": self.mode, "lang": self.lang, "barge_in": self.barge_in})
             while True:
                 message = await self.ws.receive()
                 if message["type"] == "websocket.disconnect":
@@ -139,7 +142,19 @@ class VoiceBridge:
     def open_turn(self) -> int:
         self.turn_no += 1
         self.speaking = True
+        self.bot_said = ""
         return self.turn_no
+
+    def judge_heard(self, heard: str) -> barge.Verdict:
+        """Judge words heard while Haven is speaking, and tell the client what
+        was decided, so a kept-going "mm-hmm" is visible, not mysterious."""
+        verdict = barge.judge(heard, self.bot_said[-400:])
+        if verdict.reason in ("backchannel", "echo", "stop-phrase", "takeover"):
+            session_registry.record_event(self.session_id, f"barge_{verdict.reason}", heard[:60])
+            asyncio.create_task(self.send_json({
+                "type": "heard", "text": heard, "interrupt": verdict.interrupt, "reason": verdict.reason,
+            }))
+        return verdict
 
     async def interrupt(self) -> None:
         """Tell the client to drop everything it has queued for this turn."""
@@ -171,7 +186,7 @@ class VoiceBridge:
         async def synth(text: str, out: asyncio.Queue[bytes | None]) -> None:
             try:
                 async with sem:
-                    async for chunk in deepgram.tts_stream(text, cache=cache):
+                    async for chunk in deepgram.tts_stream(text, cache=cache, voice=self.voice):
                         await out.put(chunk)
             except Exception as exc:  # noqa: BLE001 — one failed sentence must not kill the reply
                 logger.error("TTS failed: %s", exc)
@@ -204,6 +219,7 @@ class VoiceBridge:
                         # Captions are concatenated verbatim by the client (Live sends
                         # word fragments), so whole sentences carry their own space.
                         await self.send_json({"type": "agent_caption", "text": sentence + " "})
+                        self.bot_said += sentence + " "
                         captioned = True
                     await self.send_audio(chunk)
                     if first_audio is None:

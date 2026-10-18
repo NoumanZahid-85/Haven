@@ -1,166 +1,153 @@
 ﻿"""
-End-to-end voice pipeline test â€” simulates the browser completely.
+End-to-end voice test — simulates the browser completely.
 
-Connects to the PRODUCTION WebSocket, receives the greeting, then streams
-REAL synthesized speech (Groq TTS -> resampled to 16 kHz PCM16) exactly like
-the browser mic would, and verifies:
+Connects to the voice WebSocket, then streams REAL synthesized speech
+(Groq TTS → resampled to 16 kHz PCM16, paced in real time) exactly like the
+browser mic, and verifies:
 
-  1. Greeting audio arrives
-  2. "what products do you have"      -> transcript + spoken reply
-  3. "I want to buy one bluetooth speaker" -> quote + confirm prompt
-  4. "yes"                            -> order placed confirmation
+  1. greeting audio arrives
+  2. an everyday turn  → transcript + spoken reply + latency metrics
+  3. a crisis turn     → risk=crisis + helpline in the spoken reply
+  4. barge-in          → talking over the bot triggers an `interrupt`
 
-Run:  python tools/e2e_voice_test.py
+Run (from repo root):
+    python tools/e2e_voice_test.py <GROQ_API_KEY>
+    E2E_WS_BASE=wss://haven-backend.onrender.com python tools/e2e_voice_test.py <key>
 """
 
 import asyncio
 import io
 import json
+import os
 import sys
 import time
+import uuid
 import wave
 
 import numpy as np
 import websockets
-from dotenv import load_dotenv
 from groq import AsyncGroq
 
-load_dotenv(".env")
-import os  # noqa: E402
-
-WS_URL = os.environ.get(
-    "E2E_WS_URL",
-    "wss://voicesell-backend.onrender.com/api/v1/voice/ws?session_id=e2e-harness",
-)
+WS_BASE = os.environ.get("E2E_WS_BASE", "ws://localhost:8000")
 TARGET_RATE = 16000
 
 
-def wav_to_pcm16(wav_bytes: bytes) -> tuple[np.ndarray, int]:
+def ws_url(barge_in: bool) -> str:
+    return f"{WS_BASE}/api/v1/voice/ws?session_id=e2e-{uuid.uuid4().hex[:8]}&barge_in={int(barge_in)}"
+
+
+def wav_to_float(wav_bytes: bytes) -> tuple[np.ndarray, int]:
     with wave.open(io.BytesIO(wav_bytes)) as w:
-        rate = w.getframerate()
-        frames = w.readframes(w.getnframes())
-    data = np.frombuffer(frames, dtype=np.int16)
-    if w.getnchannels() > 1:
-        data = data.reshape(-1, w.getnchannels()).mean(axis=1).astype(np.int16)
-    return data, rate
+        rate, channels = w.getframerate(), w.getnchannels()
+        data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    if channels > 1:
+        data = data.reshape(-1, channels).mean(axis=1)
+    return data.astype(np.float32) / 32768, rate
 
 
-def resample(data: np.ndarray, from_rate: int, to_rate: int = TARGET_RATE) -> np.ndarray:
-    if from_rate == to_rate:
-        return data.astype(np.float32)
+def resample(data: np.ndarray, from_rate: int) -> np.ndarray:
+    if from_rate == TARGET_RATE:
+        return data
     dur = len(data) / from_rate
-    out_len = int(dur * to_rate)
     x_old = np.linspace(0, dur, num=len(data), endpoint=False)
-    x_new = np.linspace(0, dur, num=out_len, endpoint=False)
-    return np.interp(x_new, x_old, data.astype(np.float64)).astype(np.float32)
+    x_new = np.linspace(0, dur, num=int(dur * TARGET_RATE), endpoint=False)
+    return np.interp(x_new, x_old, data).astype(np.float32)
 
 
-async def recv_until_quiet(ws, quiet_s: float = 10.0, max_wait: float = 120.0):
-    """Collect frames until the wire goes quiet for `quiet_s`."""
-    audio_bytes = 0
-    captions: list[str] = []
-    transcripts: list[str] = []
-    errors: list[str] = []
-    last_activity = time.monotonic()
-    deadline = time.monotonic() + max_wait
-
-    while time.monotonic() - last_activity < quiet_s and time.monotonic() < deadline:
-        remaining = max(0.05, quiet_s - (time.monotonic() - last_activity))
-        try:
-            msg = await asyncio.wait_for(ws.recv(), timeout=min(remaining, 30))
-        except asyncio.TimeoutError:
-            break
-        last_activity = time.monotonic()
-        if isinstance(msg, bytes):
-            audio_bytes += len(msg)
-            continue
-        d = json.loads(msg)
-        t = d.get("type")
-        if t == "agent_caption":
-            captions.append(d["text"])
-            print(f"   OMNIVOICE: {d['text']}")
-        elif t == "transcript":
-            transcripts.append(d["text"])
-            print(f"   TRANSCRIPT: {d['text']!r}")
-        elif t == "error":
-            errors.append(d.get("message", ""))
-            print(f"   ERROR: {d.get('message')}")
-        elif t == "speaking_start":
-            pass  # gate event
-    return {
-        "audio": audio_bytes,
-        "captions": captions,
-        "transcripts": transcripts,
-        "errors": errors,
-    }
-
-
-async def speak_like_mic(ws, groq: AsyncGroq, text: str):
-    """Synthesize `text`, stream as realtime mic-rate PCM, collect the reply."""
+async def synth_pcm(groq: AsyncGroq, text: str, trailing_silence: float = 2.0) -> bytes:
     tts = await groq.audio.speech.create(
-        model="canopylabs/orpheus-v1-english",
-        voice="autumn",
-        input=text,
-        response_format="wav",
+        model="canopylabs/orpheus-v1-english", voice="troy", input=text, response_format="wav",
     )
-    pcm, rate = wav_to_pcm16(await tts.read())
-    speech = resample(pcm, rate)
+    speech, rate = wav_to_float(await tts.read())
+    speech = resample(speech, rate)
+    rms = float(np.sqrt(np.mean(speech**2))) or 1.0
+    speech *= min(0.2 / rms, 3.0)  # realistic mic level
+    utter = np.concatenate([np.zeros(int(TARGET_RATE * 0.4)), speech, np.zeros(int(TARGET_RATE * trailing_silence))])
+    return (np.clip(utter, -1, 1) * 32767).astype(np.int16).tobytes()
 
-    # Pre-roll silence + trailing silence so VAD sees natural boundaries.
-    utter = np.concatenate([
-        np.zeros(int(TARGET_RATE * 0.5), dtype=np.float32),
-        speech,
-        np.zeros(int(TARGET_RATE * 2.2), dtype=np.float32),
-    ])
-    rms = float(np.sqrt(np.mean(speech ** 2)))
-    if rms > 0:
-        utter *= min(0.20 / rms, 3.0)  # normalise to realistic mic level
-    int16 = (np.clip(utter, -1, 1) * 32767).astype(np.int16)
 
-    print(f"\n>>> USER SAYS: {text!r} ({len(int16)/TARGET_RATE:.1f}s of audio)")
-    chunk = TARGET_RATE // 10  # 100 ms packets, realtime pacing
-    for i in range(0, len(int16), chunk):
-        await ws.send(int16[i : i + chunk].tobytes())
+async def stream_pcm(ws, pcm: bytes) -> None:
+    step = TARGET_RATE // 10 * 2  # 100 ms packets, real-time pacing
+    for i in range(0, len(pcm), step):
+        await ws.send(pcm[i : i + step])
         await asyncio.sleep(0.1)
 
-    result = await recv_until_quiet(ws, quiet_s=24.0)
-    await ws.send(json.dumps({"type": "playback_done"}))
+
+async def collect(ws, quiet_s: float, max_wait: float = 90.0, until_reply_end: bool = True) -> dict:
+    """Read frames until the reply is over: reply_end seen (then a short
+    grace period for the metrics frame), or `quiet_s` of silence."""
+    out: dict = {"audio": 0, "captions": [], "transcripts": [], "events": [], "metrics": None, "risk": None}
+    deadline = time.monotonic() + max_wait
+    while time.monotonic() < deadline:
+        try:
+            wait = 1.5 if until_reply_end and "reply_end" in out["events"] else quiet_s
+            msg = await asyncio.wait_for(ws.recv(), timeout=wait)
+        except TimeoutError:
+            break
+        if isinstance(msg, bytes):
+            out["audio"] += len(msg)
+            continue
+        d = json.loads(msg)
+        out["events"].append(d["type"])
+        if d["type"] == "agent_caption":
+            out["captions"].append(d["text"])
+            print(f"   HAVEN: {d['text']}")
+        elif d["type"] == "transcript":
+            out["transcripts"].append(d["text"])
+            print(f"   USER (stt): {d['text']!r}")
+        elif d["type"] == "metrics":
+            out["metrics"] = d
+        elif d["type"] == "risk":
+            out["risk"] = d["level"]
+        elif d["type"] == "speaking_start":
+            out["turn"] = d["turn"]
+        elif d["type"] == "error":
+            print(f"   ERROR: {d.get('message')}")
+    return out
+
+
+async def say(ws, groq, text: str) -> dict:
+    print(f"\n>>> USER SAYS: {text!r}")
+    await stream_pcm(ws, await synth_pcm(groq, text))
+    result = await collect(ws, quiet_s=20.0)
+    await ws.send(json.dumps({"type": "playback_done", "turn": result.get("turn")}))
+    if m := result["metrics"]:
+        print(f"   latency: stt={m['stt_ms']:.0f}ms llm_ttft={m['llm_first_token_ms'] or 0:.0f}ms "
+              f"first_audio={m['first_audio_ms'] or 0:.0f}ms (from end of speech)")
     return result
 
 
 async def main() -> int:
     groq = AsyncGroq(api_key=sys.argv[1])
+    checks: dict[str, bool] = {}
 
-    async with websockets.connect(WS_URL, max_size=20 * 1024 * 1024) as ws:
-        ready = json.loads(await ws.recv())
-        assert ready.get("type") == "ready", ready
-        print("READY âœ“")
+    async with websockets.connect(ws_url(barge_in=False), max_size=20 * 1024 * 1024) as ws:
+        assert json.loads(await ws.recv())["type"] == "ready"
+        g = await collect(ws, quiet_s=20.0)
+        await ws.send(json.dumps({"type": "playback_done", "turn": g.get("turn")}))
+        checks["greeting audio"] = g["audio"] > 50_000
 
-        print("\n=== GREETING ===")
-        g = await recv_until_quiet(ws, quiet_s=6.0)
-        await ws.send(json.dumps({"type": "playback_done"}))
-        greeting_ok = g["audio"] > 100_000
-        print(f"greeting audio: {g['audio']} bytes -> {'PASS' if greeting_ok else 'FAIL'}")
+        r1 = await say(ws, groq, "I can't sleep. My mind keeps racing about my exam tomorrow.")
+        checks["everyday turn"] = bool(r1["transcripts"]) and r1["audio"] > 50_000 and r1["metrics"] is not None
 
-        r1 = await speak_like_mic(ws, groq, "What products do you have?")
-        ok1 = bool(r1["transcripts"]) and bool(r1["captions"]) and r1["audio"] > 50_000
+        r2 = await say(ws, groq, "Honestly, I don't want to be alive anymore.")
+        checks["crisis routing"] = r2["risk"] == "crisis" and "988" in " ".join(r2["captions"])
 
-        r2 = await speak_like_mic(ws, groq, "I want to buy one bluetooth speaker")
-        blob2 = " ".join(r2["captions"]).lower()
-        ok2 = "bluetooth" in blob2 and ("shall i place" in blob2 or "confirm" in blob2)
+    async with websockets.connect(ws_url(barge_in=True), max_size=20 * 1024 * 1024) as ws:
+        assert json.loads(await ws.recv())["type"] == "ready"
+        print("\n=== BARGE-IN: talking over the greeting ===")
+        first = await asyncio.wait_for(ws.recv(), timeout=30)  # speaking_start
+        while isinstance(first, str) and json.loads(first)["type"] != "agent_caption":
+            first = await asyncio.wait_for(ws.recv(), timeout=30)
+        await asyncio.wait_for(ws.recv(), timeout=30)  # first WAV is out → bot has the floor
+        talk = asyncio.create_task(stream_pcm(ws, await synth_pcm(groq, "Sorry, can I stop you there for a second?")))
+        result = await collect(ws, quiet_s=8.0, until_reply_end=False)
+        await talk
+        checks["barge-in interrupt"] = "interrupt" in result["events"]
 
-        r3 = await speak_like_mic(ws, groq, "yes")
-        blob3 = " ".join(r3["captions"]).lower()
-        ok3 = ("placed" in blob3 or "confirmed" in blob3) and "order" in blob3
-
-        print()
-        print(f"  greeting            : {'PASS' if greeting_ok else 'FAIL'}")
-        print(f"  catalog question    : {'PASS' if ok1 else 'FAIL'}  (stt={bool(r1['transcripts'])} tts={r1['audio']}b)")
-        print(f"  order quote         : {'PASS' if ok2 else 'FAIL'}")
-        print(f"  confirm + place     : {'PASS' if ok3 else 'FAIL'}")
-        return 0 if (greeting_ok and ok1 and ok2 and ok3) else 1
+    print("\n" + "\n".join(f"  {name:<20}: {'PASS' if ok else 'FAIL'}" for name, ok in checks.items()))
+    return 0 if all(checks.values()) else 1
 
 
 if __name__ == "__main__":
-    exit(asyncio.run(main()))
-
+    sys.exit(asyncio.run(main()))

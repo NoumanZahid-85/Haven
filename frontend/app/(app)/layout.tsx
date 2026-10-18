@@ -2,43 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Waveform,
-  MicrophoneStage,
-  ShoppingCartSimple,
-  ChartLineUp,
-  Storefront,
-  House,
-  SignOut,
-  UserCircle,
-} from "@phosphor-icons/react";
+import { Leaf, Microphone, Brain, ChartLineUp, House, SignOut, UserCircle } from "@phosphor-icons/react";
 import { AuthGate, useIdentity } from "@/components/auth";
 
 const NAV = {
-  workspace: [
-    {
-      href: "/chat",
-      label: "Voice Chat",
-      icon: <MicrophoneStage size={18} weight="duotone" />,
-    },
-    {
-      href: "/orders",
-      label: "Orders",
-      icon: <ShoppingCartSimple size={18} weight="duotone" />,
-    },
-    {
-      href: "/catalog",
-      label: "Catalog",
-      icon: <Storefront size={18} weight="duotone" />,
-    },
+  companion: [
+    { href: "/talk", label: "Talk", icon: <Microphone size={18} weight="duotone" /> },
+    { href: "/memory", label: "Memory", icon: <Brain size={18} weight="duotone" /> },
   ],
-  system: [
-    {
-      href: "/admin",
-      label: "Admin",
-      icon: <ChartLineUp size={18} weight="duotone" />,
-    },
-  ],
+  system: [{ href: "/insights", label: "Insights", icon: <ChartLineUp size={18} weight="duotone" /> }],
 } as const;
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -106,7 +78,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   const isActive = (href: string) =>
-    pathname === href || (href !== "/chat" && pathname.startsWith(href));
+    pathname === href || pathname.startsWith(`${href}/`);
 
   const NavList = (
     <>
@@ -134,8 +106,8 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
       {/* ── Desktop sidebar ── */}
       <aside className="sidebar desktop-only">
         <div className="sidebar-brand">
-          <Waveform size={20} color="var(--signal)" weight="fill" />
-          <span>OMNIVOICE</span>
+          <Leaf size={20} color="var(--signal)" weight="fill" />
+          <span>HAVEN</span>
         </div>
         <nav className="sidebar-nav">{NavList}</nav>
         <div
@@ -162,8 +134,8 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
               color: "inherit",
             }}
           >
-            <Waveform size={19} color="var(--signal)" weight="fill" />
-            <span>OMNIVOICE</span>
+            <Leaf size={19} color="var(--signal)" weight="fill" />
+            <span>HAVEN</span>
           </Link>
         </div>
         <nav
@@ -173,7 +145,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
             borderTop: "1px solid var(--line)",
           }}
         >
-          {[...NAV.workspace, ...NAV.system].map((item) => (
+          {[...NAV.companion, ...NAV.system].map((item) => (
             <Link
               key={item.href}
               href={item.href}

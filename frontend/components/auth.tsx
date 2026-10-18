@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { EnvelopeSimple, LockKey, UserCircle, Waveform } from "@phosphor-icons/react";
+import { EnvelopeSimple, LockKey, UserCircle, Leaf } from "@phosphor-icons/react";
 import {
   authConfigured,
   getOrCreateGuestId,
@@ -23,9 +23,8 @@ import {
  *
  * Two modes:
  *  - "user":  Supabase email/password session. customerId = auth user id.
- *  - "guest": per-browser random id (developer/demo mode). A fresh incognito
- *             window gets a brand-new id, so guests never see each other's
- *             orders — fixing the old shared-demo-customer behaviour.
+ *  - "guest": per-browser random id. A fresh incognito window gets a
+ *             brand-new id, so guests never share long-term memory.
  *
  * If Supabase env vars are missing, only guest mode is offered.
  */
@@ -74,14 +73,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const supabase = getSupabase();
     if (!supabase) {
-      // Auth not configured: guest-only mode, no login screen.
-      setIdentity({
-        customerId: getOrCreateGuestId(),
-        mode: "guest",
-        label: `Guest · ${getOrCreateGuestId().slice(0, 8)}`,
+      // Auth not configured: guest-only mode, no login screen. Resolved on a
+      // microtask, like the Supabase path, so state is set from a callback.
+      void Promise.resolve().then(() => {
+        if (cancelled) return;
+        const id = getOrCreateGuestId();
+        setIdentity({ customerId: id, mode: "guest", label: `Guest · ${id.slice(0, 8)}` });
+        setReady(true);
       });
-      setReady(true);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
     supabase.auth
       .getSession()
@@ -281,7 +283,7 @@ export function LoginScreen({
         style={{ width: "100%", maxWidth: 400, padding: "30px 28px", zIndex: 1 }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <Waveform size={24} color="var(--signal)" weight="fill" />
+          <Leaf size={24} color="var(--signal)" weight="fill" />
           <strong
             style={{
               fontSize: 17,
@@ -289,11 +291,11 @@ export function LoginScreen({
               color: "var(--text-hi)",
             }}
           >
-            OMNIVOICE
+            HAVEN
           </strong>
         </div>
         <p style={{ color: "var(--text-mid)", fontSize: 13.5, marginBottom: 18, lineHeight: 1.5 }}>
-          Sign in so your orders stay private to your account.
+          Sign in so Haven can remember your conversations — privately, and only for you.
         </p>
 
         <div role="tablist" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -424,9 +426,9 @@ export function LoginScreen({
             lineHeight: 1.55,
           }}
         >
-          Guests get a private, browser-local ID — orders stay isolated per browser and are not
-          linked to an email. Sign in with any account (or create several) to keep each
-          account's orders separate; use Sign out in the sidebar to switch.
+          Guests get a private, browser-local ID — what Haven remembers stays in this browser
+          and is not linked to an email. Sign in to keep your memory across devices. You can
+          review or erase it anytime from the Memory page.
         </p>
         {!authConfigured() && (
           <p className="label-mono" style={{ marginTop: 10 }}>

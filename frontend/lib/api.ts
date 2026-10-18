@@ -2,16 +2,7 @@
 // Pages name the data they want; this module owns URL construction,
 // HTTP error handling, timeouts, and JSON parsing.
 
-import type {
-  AdminStats,
-  CategoryListResponse,
-  ChatResponse,
-  HealthData,
-  OrderListResponse,
-  ProductListResponse,
-  VoiceConnectResponse,
-  VoiceSession,
-} from "./types";
+import type { ChatResponse, HealthData, Insights, MemoryResponse } from "./types";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -100,45 +91,25 @@ async function send(path: string, init?: RequestInit): Promise<void> {
 export const api = {
   health: () => fetchJSON<HealthData>("/health", undefined, 15_000, true), // retry once — cold-start can take ~14s
 
-  chat: (message: string, sessionId: string, customerId?: string) =>
+  chat: (message: string, sessionId: string, userId?: string) =>
     fetchJSON<ChatResponse>("/api/v1/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, session_id: sessionId, customer_id: customerId ?? "" }),
+      body: JSON.stringify({ message, session_id: sessionId, user_id: userId ?? "" }),
     }),
 
-  orders: (customerId: string, limit = 50) =>
-    fetchJSON<OrderListResponse>(`/api/v1/orders?customer_id=${customerId}&limit=${limit}`),
+  memory: (userId: string) => fetchJSON<MemoryResponse>(`/api/v1/memory/${encodeURIComponent(userId)}`),
 
-  cancelOrder: (orderId: string, customerId: string) =>
-    send(`/api/v1/orders/${orderId}?customer_id=${customerId}`, { method: "DELETE" }),
+  forget: (userId: string) => send(`/api/v1/memory/${encodeURIComponent(userId)}`, { method: "DELETE" }),
 
-  adminStats: () => fetchJSON<AdminStats>("/api/v1/admin/stats", undefined, 20_000),
-
-  categories: () => fetchJSON<CategoryListResponse>("/api/v1/categories", undefined, 10_000),
-
-  products: (opts: { search?: string; categoryId?: string; limit?: number }) => {
-    const params = new URLSearchParams({ limit: String(opts.limit ?? 500) });
-    if (opts.search?.trim()) params.set("search", opts.search.trim());
-    if (opts.categoryId) params.set("category_id", opts.categoryId);
-    return fetchJSON<ProductListResponse>(`/api/v1/products?${params}`);
-  },
+  insights: () => fetchJSON<Insights>("/api/v1/insights", undefined, 20_000),
 
   voice: {
-    connect: () =>
-      fetchJSON<VoiceConnectResponse>("/api/v1/voice/connect", { method: "POST" }),
-    disconnect: (sessionId: string) =>
-      send(`/api/v1/voice/connect/${sessionId}`, { method: "DELETE" }),
-    sessions: () => fetchJSON<VoiceSession[]>("/api/v1/voice/sessions"),
-    wsUrl: (sessionId: string, customerId?: string) => {
+    wsUrl: (sessionId: string, userId: string, bargeIn: boolean) => {
       const wsBase = BACKEND.replace(/^http/, "ws");
-      const params = new URLSearchParams({ session_id: sessionId });
-      if (customerId) params.set("customer_id", customerId);
+      const params = new URLSearchParams({ session_id: sessionId, barge_in: bargeIn ? "1" : "0" });
+      if (userId) params.set("user_id", userId);
       return `${wsBase}/api/v1/voice/ws?${params}`;
     },
   },
 };
-
-/** Legacy shared demo customer — kept only as a backend default for
- *  requests that omit customer_id. The UI never sends it anymore. */
-export const DEMO_CUSTOMER_ID = "00000000-0000-0000-0000-000000000001";

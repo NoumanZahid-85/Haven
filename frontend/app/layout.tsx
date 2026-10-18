@@ -17,12 +17,12 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OMNIVOICE — Voice-Powered Sales Assistant",
+  title: "Haven — a voice companion for the hard moments",
   description:
-    "Talk to an AI sales agent by voice or text. Get instant product answers, place orders, and get personalised recommendations — all in under 500ms.",
+    "Someone to talk to at 2:37 in the morning. A real-time voice AI companion for mental wellbeing and personal growth, with safety guardrails and memory.",
   openGraph: {
-    title: "OMNIVOICE",
-    description: "Voice-powered e-commerce AI agent with RAG-grounded answers",
+    title: "Haven",
+    description: "Real-time voice AI companion for mental wellbeing",
     type: "website",
   },
 };

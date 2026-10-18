@@ -1,20 +1,12 @@
-// Formatting helpers — one place for money and time rendering.
-
-export function formatCurrency(value: number | undefined | null): string {
-  if (value === undefined || value === null || Number.isNaN(value)) return "—";
-  return `$${value.toFixed(2)}`;
-}
-
-/** Short date used in tables: "Aug 18, 2026". */
-export function formatOrderDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+// Formatting helpers — one place for time and latency rendering.
 
 /** Chat timestamps: "03:18 PM". */
 export function formatTime(date: Date): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Latency: "340 ms" / "2.3 s" / "—". */
+export function formatMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return "—";
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }

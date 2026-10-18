@@ -1,21 +1,12 @@
-// UI kit — the shared primitives of the broadcast-console design.
-// One implementation for the page chrome, status badges, and the
+// UI kit — the shared primitives of the app design.
+// One implementation for the page chrome and the
 // loading / error / empty state trio, so pages compose instead of copy.
 
 "use client";
 
 import type { ReactNode } from "react";
 import { motion } from "motion/react";
-import {
-  CheckCircle,
-  Clock,
-  Truck,
-  XCircle,
-  ArrowClockwise,
-  WarningCircle,
-  Package,
-} from "@phosphor-icons/react";
-import type { OrderStatus } from "@/lib/types";
+import { XCircle, ArrowClockwise, WarningCircle, Leaf } from "@phosphor-icons/react";
 
 // ── Page chrome ──────────────────────────────────────────────────────
 
@@ -59,37 +50,6 @@ export function PageHeader({ icon, title, subtitle, actions }: PageHeaderProps) 
       </div>
       {actions}
     </div>
-  );
-}
-
-// ── Status badges ────────────────────────────────────────────────────
-
-export const STATUS_META: Record<OrderStatus, { label: string; led: string; icon: ReactNode }> = {
-  pending:    { label: "Pending",    led: "led-warn",   icon: <Clock size={11} weight="fill" /> },
-  confirmed:  { label: "Confirmed",  led: "led-info",   icon: <CheckCircle size={11} weight="fill" /> },
-  shipped:    { label: "Shipped",    led: "led-violet", icon: <Truck size={11} weight="fill" /> },
-  delivered:  { label: "Delivered",  led: "led-ok",     icon: <CheckCircle size={11} weight="fill" /> },
-  cancelled:  { label: "Cancelled",  led: "led-err",    icon: <XCircle size={11} weight="fill" /> },
-};
-
-export function StatusBadge({ status }: { status: OrderStatus }) {
-  const meta = STATUS_META[status];
-  return (
-    <span className={`badge badge-${status}`}>
-      {meta.icon}
-      {meta.label}
-    </span>
-  );
-}
-
-export function StockBadge({ stock }: { stock: number }) {
-  const out = stock <= 0;
-  const low = stock < 10;
-  return (
-    <span className={`badge ${out ? "badge-cancelled" : low ? "badge-pending" : "badge-delivered"}`}>
-      <span className={`led ${out ? "led-err" : low ? "led-warn" : "led-ok"}`} />
-      {out ? "Out of stock" : low ? "Low stock" : "In stock"}
-    </span>
   );
 }
 
@@ -149,7 +109,7 @@ export function ErrorPanel({ message, onRetry }: { message: string; onRetry?: ()
 export function EmptyPanel({ title, message }: { title: string; message: ReactNode }) {
   return (
     <StatePanel
-      icon={<Package size={44} color="var(--text-low)" weight="duotone" />}
+      icon={<Leaf size={44} color="var(--text-low)" weight="duotone" />}
       title={title}
       message={message}
     />

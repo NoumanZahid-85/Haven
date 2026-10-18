@@ -13,7 +13,7 @@ function LoginFlow() {
   const { identity, ready } = useIdentity();
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/chat";
+  const next = params.get("next") || "/talk";
   const initialMode = params.get("mode") === "signup" ? "signup" : "signin";
 
   useEffect(() => {

@@ -29,13 +29,13 @@ export function getSupabase(): SupabaseClient | null {
 }
 
 /** localStorage key holding this browser's guest identity. */
-export const GUEST_ID_KEY = "voicesell.guest_id";
+export const GUEST_ID_KEY = "haven.guest_id";
 
 /** sessionStorage marker: this tab explicitly chose guest mode. Survives
  *  reloads within the tab, but a fresh tab/incognito must choose again. */
-export const GUEST_CHOICE_KEY = "voicesell.guest_choice";
+export const GUEST_CHOICE_KEY = "haven.guest_choice";
 
-/** Random per-browser id so incognito/private windows never share orders. */
+/** Random per-browser id so incognito/private windows never share memory. */
 export function getOrCreateGuestId(): string {
   if (typeof window === "undefined") return "";
   let id = window.localStorage.getItem(GUEST_ID_KEY);

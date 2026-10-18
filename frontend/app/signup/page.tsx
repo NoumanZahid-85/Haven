@@ -11,7 +11,7 @@ function SignupFlow() {
   const router = useRouter();
 
   useEffect(() => {
-    if (ready && identity) router.replace("/chat");
+    if (ready && identity) router.replace("/talk");
   }, [ready, identity, router]);
 
   if (ready && identity) return null;

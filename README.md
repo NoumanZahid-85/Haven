@@ -1,83 +1,118 @@
-﻿# Haven
+﻿<div align="center">
 
-**A real-time voice companion for mental wellbeing.** Someone to talk to at 2:37 in the morning.
+# Haven
 
-Haven is a voice-first AI companion for everyday hard moments: a sleepless night, anxiety before work, a breakup. Tap once and talk. It replies in a natural voice, can be interrupted, remembers what matters across conversations, and routes people in crisis to human help.
+**Someone to talk to, right now.**
 
-**Live demo:** [haven-frontend-w8bx.onrender.com](https://haven-frontend-w8bx.onrender.com) · **API docs:** [haven-backend-d06n.onrender.com/docs](https://haven-backend-d06n.onrender.com/docs)
+A real-time voice companion for the hard moments: a sleepless night, dread before work, a breakup you keep replaying.<br/>
+Talk out loud, interrupt anytime, and pick up where you left off.
 
-> Haven is not a therapist or an emergency service. The demo runs on Render's free tier, so the first request after a period of inactivity can take about a minute while the instance wakes up.
+[**Try it live**](https://haven-frontend-w8bx.onrender.com) &nbsp;&nbsp;|&nbsp;&nbsp; [API docs](https://haven-backend-d06n.onrender.com/docs) &nbsp;&nbsp;|&nbsp;&nbsp; [Live metrics](https://haven-frontend-w8bx.onrender.com/insights)
+
+<sub>Free hosting: the first visit after a quiet spell takes about a minute to wake up.</sub>
+
+<img src="docs/images/talk.png" alt="The Talk screen: a warm lamp you tap to start a voice conversation" width="820" />
+
+</div>
 
 ---
 
-## Features
+## Why this exists
 
-- **Real-time voice.** One WebSocket carries the audio: Silero VAD → Whisper STT → streaming LLM → per-sentence TTS → ordered playback.
-- **Streaming responses.** The first sentence is synthesized while the LLM is still generating the rest.
-- **Barge-in.** Optional full-duplex mode: speak over Haven and it stops, then listens.
-- **Safety on both sides of the model.** Crisis language bypasses the LLM for a fixed response with helplines. Every spoken sentence is screened before TTS.
-- **Long-term memory.** Durable facts persist across sessions. Users can view all of them and erase them.
-- **Technique retrieval (RAG).** 15 evidence-based techniques (CBT, ACT, breathing, grounding, sleep) are offered only when relevant.
-- **Evaluation loop.** Per-turn latency telemetry, LLM-as-judge scoring, and a regression suite built from the weakest turns.
+Every 40 seconds someone dies by suicide, and long before that there are hundreds of smaller moments when nobody is around to talk to. Haven is built for those moments. It **listens first**, keeps short reply loops so the conversation feels like a conversation, **remembers what matters** to you between sessions, and when something sounds serious it **stops improvising** and points you to real people.
 
-## Architecture
+> Haven is not a therapist and not an emergency service. In the US call or text 988, in the UK and Ireland call Samaritans on 116 123, elsewhere see [findahelpline.com](https://findahelpline.com).
+
+---
+
+## Two voice engines, one conversation
+
+Haven runs two complete real-time voice architectures behind the same WebSocket, and you can switch between them on the Talk screen. They make opposite trade-offs, which is the point.
+
+| | **Natural** | **Checked** |
+|---|---|---|
+| How it works | Native speech-to-speech: one model hears and speaks | Streaming STT → LLM → per-sentence TTS |
+| Stack | Gemini 3.1 Flash Live | Deepgram Flux → Groq `gpt-oss-120b` → Deepgram Aura-2 |
+| Turn-taking | Gemini's built-in activity detection | Flux semantic end-of-turn + speculative replies |
+| First audio after you stop speaking* | **1.6–1.7 s** | **1.8–1.9 s** |
+| Safety | Live transcripts screened; model muted and overridden on risk | Every sentence screened *before* it is spoken |
+| Best at | Prosody, tone, feeling human | Control, auditability, guarantees |
+
+<sub>*Measured in production (Render, Frankfurt) by `tools/e2e_voice_test.py`, which streams real recorded speech over the socket like a browser does. The previous Whisper + Orpheus build took 3.0–3.7 s.</sub>
 
 ```mermaid
 flowchart LR
-    MIC["Browser mic<br/>16 kHz PCM16"] -->|WebSocket| VAD["Silero VAD<br/>turns + barge-in"]
-    VAD --> STT["Groq Whisper"]
-    STT --> SAFE{"Safety screen"}
-    SAFE -->|crisis| SCRIPT["Fixed response<br/>+ helplines"]
-    SAFE -->|none / elevated| CTX["Persona + memory<br/>+ techniques + history"]
-    CTX --> LLM["LLM stream<br/>Groq → Gemini fallback"]
-    LLM --> SEG["Sentence split<br/>+ output guardrail"]
-    SCRIPT --> SEG
-    SEG --> TTS["Orpheus TTS<br/>per sentence"]
-    TTS -->|WAV frames| PLAY["Ordered playback"]
-    SEG -.-> DB[("Postgres<br/>turns · memories · evals")]
+    MIC["Browser mic<br/>16 kHz PCM"] -->|one WebSocket| BRIDGE["Voice bridge<br/>floor control · latency · persistence"]
+    BRIDGE -->|Natural| LIVE["Gemini Live<br/>speech in → speech out"]
+    BRIDGE -->|Checked| FLUX["Deepgram Flux<br/>STT + end-of-turn"]
+    FLUX --> ENGINE["Companion engine<br/>safety · memory · technique RAG"]
+    ENGINE --> LLM["Groq LLM stream"]
+    LLM --> GUARD["Sentence guardrail"]
+    GUARD --> TTS["Deepgram Aura-2<br/>streaming TTS"]
+    LIVE -. transcripts .-> SAFETY["Safety screen<br/>crisis override"]
+    LIVE --> OUT
+    TTS --> OUT["24 kHz PCM stream<br/>gapless playback"]
+    SAFETY -. mutes model, speaks script .-> OUT
+    BRIDGE -.-> DB[("Postgres<br/>turns · memories · evals")]
 ```
 
-| Layer | Technology |
+---
+
+## The interesting parts
+
+Each of these exists because a measurement said it should.
+
+**Speculative replies.** Flux emits an *eager* end-of-turn about half a second before it is sure you've finished. Checked mode starts the LLM and TTS on that early signal but holds the audio. If you keep talking (`TurnResumed`), the draft is thrown away unheard. If the turn is confirmed, the audio is released instantly. In production, first audio goes out within about 50 ms of the turn being confirmed.
+
+**Retrieval while you're still talking.** Looking up a fitting coping technique costs an embedding round trip (616 ms, measured). Haven runs it on the *partial* transcript as you speak, so by the time you finish, planning takes about 1 ms.
+
+**No lost words on a pause.** If the turn closes on a breath ("Honestly, …") and you keep going before any reply is audible, the half-sentence is carried into your next turn instead of being answered on its own.
+
+**Barge-in that respects what you heard.** Talk over Haven and the reply is cancelled mid-sentence. Only the sentences actually delivered are written to history, so the model's memory of the conversation matches yours. Every reply carries a turn id, so a stale "finished playing" event can never reopen the mic in the middle of the next turn.
+
+**A deterministic crisis path.** Crisis language never reaches the LLM in Checked mode. A fixed response with helplines is spoken, and it plays from cache in about 0.85 s. In Natural mode, the model's live transcripts are screened as they arrive: on risk, the model is muted for the rest of its turn, the client flushes its audio, and the same script is spoken in a separate voice.
+
+**Measure, don't assume.** The technique catalog went into Gemini's instructions instead of a tool call, because the tool round trip added about 0.8 s before the first word. Flux thresholds were tuned on real phrases: the defaults took 2.4 s to close a plain statement, the most aggressive setting closed turns mid-breath, and the middle setting shipped.
+
+---
+
+## What else is inside
+
+- **Long-term memory.** After each turn, an LLM extracts at most two durable facts ("has a job interview Friday", "breathing exercises helped"). They shape future conversations and are fully visible and erasable on the Memory page.
+- **Technique knowledge base.** 15 evidence-based techniques (CBT reframing, ACT defusion, box breathing, 5-4-3-2-1 grounding, sleep wind-down, behavioural activation and more), offered one step at a time and only when the person seems open to it.
+- **Two-sided safety.** Input is screened into three tiers (none, elevated, crisis), with negation handling ("I'd never hurt myself" is elevated, not crisis). Output is screened so the model never diagnoses, never doses medication, and never claims to be a clinician.
+- **Evaluation loop.** Every turn is stored with its latency breakdown and risk tier. An LLM judge scores replies on empathy, safety, helpfulness and how they sound spoken aloud. The weakest production turns are promoted into a regression suite (`14/14` passing), which gates prompt changes.
+- **Live insights.** The [Insights page](https://haven-frontend-w8bx.onrender.com/insights) shows response-time percentiles per engine, safety-tier counts and judge scores, all computed from stored turns.
+- **Text fallback.** Same engine over REST for when you can't talk out loud.
+
+<img src="docs/images/landing.png" alt="Landing page showing the visitor's local time and the headline 'Someone to talk to, right now.'" width="820" />
+
+---
+
+## Stack
+
+| Layer | Choice |
 | --- | --- |
-| Voice transport | WebSocket + Web Audio API |
-| Turn detection | Silero VAD (ONNX) |
-| Speech-to-text | Groq Whisper `large-v3-turbo` |
+| Speech-to-speech | Gemini 3.1 Flash Live (`google-genai`) |
+| Streaming STT and turn detection | Deepgram Flux |
 | LLM | Groq `gpt-oss-120b`, Gemini fallback via LiteLLM |
-| Text-to-speech | Groq Orpheus |
+| Streaming TTS | Deepgram Aura-2 (HTTP streaming on a pooled, pre-warmed connection) |
 | Retrieval | Gemini embeddings, in-memory cosine |
+| Backend | FastAPI, one WebSocket per conversation, fully async |
 | Storage | PostgreSQL (turns, memories, evals), Redis (conversation window) |
-| Backend / Frontend | FastAPI · Next.js |
-| Hosting | Render (Docker) |
+| Frontend | Next.js, Web Audio (16 kHz capture, gapless 24 kHz playback) |
+| Hosting | Render (Docker), all on free tiers |
 
-## Performance
+---
 
-These were measured end to end with real audio using `tools/e2e_voice_test.py`, on Groq's free tier.
+## Run it locally
 
-| Stage | Latency |
-| --- | --- |
-| Speech-to-text | 330–430 ms |
-| LLM first token | 370–730 ms |
-| First audio, normal turn | 1.9–2.6 s |
-| First audio, crisis turn (cached) | 0.35–0.43 s |
-
-The regression suite passes 14 of 14 cases, covering crisis routing, negation, medication and diagnosis requests, and prompt injection. Live p50/p95 per stage are on the **Insights** page.
-
-## Key design decisions
-
-- **The crisis path is deterministic.** The highest-stakes turn never depends on sampling, provider uptime, or prompt injection.
-- **Guardrails run per sentence.** Because replies stream into speech, each sentence is checked before it is spoken, not after.
-- **Half-duplex is the default.** Echo cannot be transcribed by construction. Barge-in is opt-in, uses stricter VAD thresholds, and every reply carries a turn ID so stale events never reopen the mic.
-- **History records what was heard.** After an interruption, only the sentences actually delivered are stored.
-- **RAG runs in memory.** A small curated corpus doesn't need a vector database on the latency path.
-
-## Getting started
-
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 18+, and a [Groq API key](https://console.groq.com).
+You need Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 18+, and three free API keys: [Gemini](https://aistudio.google.com/apikey), [Deepgram](https://console.deepgram.com) ($200 sign-up credit) and [Groq](https://console.groq.com).
 
 ```bash
 # Backend
 cd backend
-cp .env.example .env          # set GROQ_API_KEY (GEMINI_API_KEY optional)
+cp .env.example .env    # add GEMINI_API_KEY, DEEPGRAM_API_KEY, GROQ_API_KEY
 uv sync
 DATABASE_URL=sqlite+aiosqlite:///local_dev.db uv run uvicorn app.main:app --port 8000
 
@@ -87,50 +122,44 @@ cp .env.example .env.local    # NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 npm install && npm run dev
 ```
 
-Open http://localhost:3000 and go to **Talk**.
+Open http://localhost:3000, go to **Talk**, and tap the light.
 
-## Testing
+## Test it
 
 ```bash
 cd backend
-uv run pytest                                   # 41 tests, no network
-uv run ruff check app tests scripts
-uv run python -m scripts.evaluate cases         # regression suite (live LLM)
-python ../tools/e2e_voice_test.py $GROQ_API_KEY # full voice pipeline, real audio
+uv run pytest                                  # 44 tests, no network: both engines with fake providers
+uv run ruff check app tests scripts && uv run pyright app scripts
+uv run python -m scripts.evaluate cases        # 14 red-team and behaviour cases against the live LLM
+python ../tools/e2e_voice_test.py              # real speech through both engines, end to end
 ```
 
-## API
+## Deploy
 
-| Endpoint | Purpose |
-| --- | --- |
-| `WS /api/v1/voice/ws` | Voice session (`session_id`, `user_id`, `barge_in`) |
-| `POST /api/v1/chat` | Text conversation, same engine |
-| `GET/DELETE /api/v1/memory/{user_id}` | View or erase long-term memory |
-| `GET /api/v1/insights` | Volume, latency percentiles, safety tiers, eval scores |
-| `GET /api/v1/voice/selftest` | Server-side TTS → STT round trip |
-| `GET /health` | Database and provider status |
+`render.yaml` provisions Postgres, Redis, the backend and the frontend. Set `GEMINI_API_KEY`, `DEEPGRAM_API_KEY` and `GROQ_API_KEY` on the backend. Tables are created on boot.
 
-## Deployment
+To check a deployment: `/health` shows provider and database status, `/api/v1/voice/selftest` runs a TTS→STT round trip and a Gemini Live reply, and `/api/v1/voice/events` streams recent pipeline events, including every Flux turn decision with its timing.
 
-`render.yaml` provisions Postgres, Redis, the backend, and the frontend. Set `GROQ_API_KEY` and `GEMINI_API_KEY` on the backend. Tables are created on startup.
-
-## Project structure
+## Project map
 
 ```
 backend/app/
-  api/        voice WebSocket, chat, memory, insights, health
-  services/   companion engine, safety, knowledge (RAG), memory, LLM gateway
-  voice/      VAD state machine, streaming TTS, barge-in
-  db/         models: memories, turns, turn_evals
+  voice/        bridge.py (shared protocol, streaming TTS), live_session.py, pipeline_session.py, deepgram.py
+  services/     companion engine, safety, knowledge (RAG), memory, LLM gateway, prompts
+  api/          voice WebSocket, chat, memory, insights, diagnostics
 backend/scripts/evaluate.py   LLM judge + regression suite
 frontend/app/                 landing, talk, memory, insights
-tools/e2e_voice_test.py       browser-equivalent voice test
+tools/e2e_voice_test.py       browser-equivalent voice test for both engines
 ```
 
-## Roadmap
+## What's next
 
-- Streaming TTS to bring first audio under 1 s
-- Fine-tuned risk classifier alongside the deterministic screen
-- JWT verification on REST and WebSocket requests
-- Server-side echo cancellation for barge-in on laptop speakers
-- Clinical review of the technique wording and crisis script
+- **Under one second.** Tuned activity detection in Natural mode, and a regional deployment closer to users.
+- **A learned risk classifier** running alongside the deterministic screen, trained on judged and clinician-reviewed turns.
+- **Identity.** JWT verification on REST and the WebSocket handshake. The backend currently trusts the client's user id.
+- **Echo handling.** Server-side echo cancellation so barge-in works on laptop speakers, not just headphones.
+- **Clinical review** of the technique wording and the crisis script before any real-world use.
+
+<div align="center">
+<sub>Built by <a href="https://github.com/NoumanZahid-85">Nouman Zahid</a></sub>
+</div>

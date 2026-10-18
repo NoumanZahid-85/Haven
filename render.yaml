@@ -42,9 +42,14 @@ services:
           name: haven-redis
           type: keyvalue
           property: connectionString
-      - key: GROQ_API_KEY
-        sync: false
+      # Natural mode (Gemini Live), fallback LLM, embeddings
       - key: GEMINI_API_KEY
+        sync: false
+      # Checked mode speech in/out (Flux STT, Aura-2 TTS)
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      # Checked mode + text chat LLM
+      - key: GROQ_API_KEY
         sync: false
       - key: APP_NAME
         value: Haven

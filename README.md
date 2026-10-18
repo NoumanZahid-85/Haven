@@ -4,7 +4,9 @@
 
 Haven is a voice-first AI companion for everyday hard moments: a sleepless night, anxiety before work, a breakup. Tap once and talk. It replies in a natural voice, can be interrupted, remembers what matters across conversations, and routes people in crisis to human help.
 
-> Haven is not a therapist or an emergency service.
+**Live demo:** [haven-frontend-w8bx.onrender.com](https://haven-frontend-w8bx.onrender.com) · **API docs:** [haven-backend-d06n.onrender.com/docs](https://haven-backend-d06n.onrender.com/docs)
+
+> Haven is not a therapist or an emergency service. The demo runs on Render's free tier, so the first request after a period of inactivity can take about a minute while the instance wakes up.
 
 ---
 

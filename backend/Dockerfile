@@ -2,70 +2,39 @@
 FROM python:3.11-slim AS builder
 WORKDIR /app
 
-# System libraries required by daily-python (WebRTC audio stack).
-# libgl1-mesa-glx was removed in Debian Trixie — use libgl1 + libglx-mesa0.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 \
-    libglib2.0-0 \
-    libgl1 \
-    libglx-mesa0 \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy pre-generated requirements.txt (run `uv export --no-dev -o requirements.txt` locally).
-# Using a pre-generated file avoids needing uv or any external registry inside Docker.
+# Pre-generated lockfile export (`uv export --no-dev -o requirements.txt`)
+# so the image needs no uv and resolves nothing at build time.
 COPY requirements.txt ./
-
-# Install all dependencies via pip.
-# --no-cache-dir : keeps the image lean
-# --timeout 300  : generous timeout for large wheels (daily-python ~80MB)
 RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
-
-# Copy application source (after deps so this layer doesn't invalidate the dep layer)
-COPY . .
 
 # ── Stage 2: lean runtime image ────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-# Same OS libs are needed at runtime (the installed .so files link to them).
+# C++ runtime for onnxruntime (Silero VAD). The old WebRTC stack also needed
+# libGL/glib/ffmpeg for daily-python; the plain-WebSocket transport doesn't.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
-    libglib2.0-0 \
-    libgl1 \
-    libglx-mesa0 \
-    ffmpeg \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && adduser --disabled-password --no-create-home --gecos "" appuser
 
-# Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy application source
 COPY . .
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    HOME=/app \
-    NLTK_DATA=/app/.nltk_data
+    HOME=/app
 
-# chown runs LAST, after every COPY — COPY always writes as root regardless
-# of what ran before it, so an earlier chown gets silently undone for any
-# path that exists in the build context (e.g. the git-tracked scripts/data/
-# directory, which caused a PermissionError on every auto-seed attempt: the
-# directory itself was root-owned with no write bit for appuser).
-RUN mkdir -p /app/.nltk_data && chown -R appuser /app
-
+# chown runs LAST — COPY always writes as root.
+RUN chown -R appuser /app
 USER appuser
 
 EXPOSE 8000
 
-# Shell form (not exec-array form) so ${WEB_CONCURRENCY} actually expands —
-# Render sets this based on the instance's available CPUs (1 on free tier).
-# The old hardcoded "--workers 2" doubled memory use (two full copies of the
-# app process — pipecat, langgraph, onnxruntime, qdrant client) on a plan
-# that only has room for one.
+# Shell form so ${WEB_CONCURRENCY} expands (Render sets it; 1 on free tier).
+# Voice sessions hold in-process state, so one worker per instance.
 CMD gunicorn app.main:app \
     --workers ${WEB_CONCURRENCY:-1} \
     --worker-class uvicorn.workers.UvicornWorker \

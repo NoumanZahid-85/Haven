@@ -19,7 +19,7 @@ Companion engine — one conversational turn, shared by voice and text.
        ▼  (after the reply, off the hot path)
     persist Turn (+ latency breakdown) · append history · extract memory facts
 
-The engine knows nothing about audio. ws_session.py turns the sentence
+The engine knows nothing about audio. voice/pipeline_session.py turns the sentence
 stream into speech; api/chat.py just joins it into text.
 """
 
@@ -80,8 +80,17 @@ class TurnPlan:
     llm_first_token_ms: float | None = None
 
 
-async def plan_turn(convo: Conversation, user_text: str) -> TurnPlan:
-    """Screen the input and assemble the prompt for this turn."""
+async def plan_turn(
+    convo: Conversation,
+    user_text: str,
+    techniques: list[knowledge.Technique] | None = None,
+) -> TurnPlan:
+    """Screen the input and assemble the prompt for this turn.
+
+    `techniques` lets a voice engine pass retrieval it already ran on the
+    partial transcript while the user was still speaking, which takes the
+    embedding round trip off the critical path.
+    """
     risk = screen_input(user_text)
     if risk is Risk.CRISIS:
         logger.warning("Crisis language detected session=%s", convo.session_id)
@@ -89,7 +98,12 @@ async def plan_turn(convo: Conversation, user_text: str) -> TurnPlan:
 
     settings = get_settings()
     # Techniques are withheld under elevated risk: listen first, fix later.
-    retrieval = knowledge.retrieve(user_text, settings.knowledge_top_k) if risk is Risk.NONE else _no_techniques()
+    if risk is not Risk.NONE:
+        retrieval = _no_techniques()
+    elif techniques is not None:
+        retrieval = _given(techniques)
+    else:
+        retrieval = knowledge.retrieve(user_text, settings.knowledge_top_k)
     history, techniques = await asyncio.gather(cache.get_history(convo.session_id), retrieval)
 
     system = PERSONA_PROMPT.format(
@@ -109,6 +123,10 @@ async def plan_turn(convo: Conversation, user_text: str) -> TurnPlan:
 
 async def _no_techniques() -> list[knowledge.Technique]:
     return []
+
+
+async def _given(techniques: list[knowledge.Technique]) -> list[knowledge.Technique]:
+    return techniques
 
 
 def _clean(sentence: str) -> str:

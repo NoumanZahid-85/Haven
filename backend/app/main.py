@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.insights import router as insights_router
+from app.api.journey import router as journey_router
 from app.api.memory import router as memory_router
 from app.api.voice import router as voice_router
 from app.api.voice_ws import router as voice_ws_router
@@ -51,7 +52,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for router in (health_router, voice_ws_router, voice_router, chat_router, memory_router, insights_router):
+    for router in (health_router, voice_ws_router, voice_router, chat_router, memory_router, journey_router, insights_router):
         app.include_router(router)
     return app
 

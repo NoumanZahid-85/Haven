@@ -4,6 +4,8 @@ Async SQLAlchemy models — everything the companion persists.
   Memory     long-term facts about a user, carried across sessions
   Turn       one user utterance + reply, with risk level and latency breakdown
   TurnEval   LLM-as-judge scores for a turn (the offline learning loop)
+  Win        an achievement the person mentioned, kept so it can be noticed later
+  Takeaway   end-of-conversation summary, mood shift and one next step
 
 Turns are the raw material of the evaluation loop: every production turn is
 stored with its timings, scripts/evaluate.py scores them against a rubric, and
@@ -70,3 +72,36 @@ class TurnEval(Base):
     overall: Mapped[float] = mapped_column(Float, nullable=False)
     critique: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Win(Base):
+    """Something the person did or achieved, however small — in their words.
+
+    For high achievers a win often doesn't register ("closed the deal, next").
+    Haven keeps these and brings them back, because noticing them is the point.
+    """
+
+    __tablename__ = "wins"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Takeaway(Base):
+    """End-of-conversation card: what was talked about, how the person's mood
+    moved, and one concrete next step they can take by tomorrow."""
+
+    __tablename__ = "takeaways"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    mood_start: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    mood_end: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    next_step: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    lang: Mapped[str] = mapped_column(String(5), nullable=False, default="en")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

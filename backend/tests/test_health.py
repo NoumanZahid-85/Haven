@@ -56,3 +56,31 @@ def test_memory_can_be_read_and_forgotten(client):
 
 def test_chat_rejects_empty_message(client):
     assert client.post("/api/v1/chat", json={"message": "", "session_id": "s"}).status_code == 422
+
+
+def test_takeaway_and_journey(client, monkeypatch):
+    from app.services import takeaway
+
+    async def fake_stream(_messages):
+        yield "That sounds like a big week. What helped most?"
+
+    async def fake_generate(_messages, **_kw):
+        return (
+            '{"summary": "You talked through a stressful week and the deal you closed.",'
+            ' "mood_start": "drained", "mood_end": "lighter",'
+            ' "next_step": "Tell one person about the deal by tomorrow evening."}'
+        )
+
+    monkeypatch.setattr(companion, "llm_stream", fake_stream)
+    monkeypatch.setattr(takeaway, "llm_generate", fake_generate)
+
+    client.post("/api/v1/chat", json={"message": "I closed the biggest deal of my year", "session_id": "tk1", "user_id": "u-tk"})
+    card = client.post("/api/v1/sessions/tk1/takeaway?user_id=u-tk").json()
+    assert card["mood_start"] == "drained" and card["next_step"].startswith("Tell one person")
+
+    again = client.post("/api/v1/sessions/tk1/takeaway?user_id=u-tk").json()
+    assert again["summary"] == card["summary"]  # idempotent: one card per conversation
+
+    journey = client.get("/api/v1/journey/u-tk").json()
+    assert [t["session_id"] for t in journey["takeaways"]] == ["tk1"]
+    assert client.post("/api/v1/sessions/empty-session/takeaway").status_code == 404

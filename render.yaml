@@ -66,7 +66,7 @@ services:
     envVars:
       # Full URL of the backend service (baked in at build time).
       - key: NEXT_PUBLIC_BACKEND_URL
-        value: https://haven-backend.onrender.com
+        value: https://haven-backend-d06n.onrender.com
       # Optional Supabase email/password login; omit for guest-only mode.
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false

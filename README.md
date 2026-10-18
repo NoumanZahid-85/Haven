@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # Haven
 
@@ -40,21 +40,7 @@ Haven runs two complete real-time voice architectures behind the same WebSocket,
 
 <sub>*Measured in production (Render, Frankfurt) by `tools/e2e_voice_test.py`, which streams real recorded speech over the socket like a browser does. The previous Whisper + Orpheus build took 3.0–3.7 s.</sub>
 
-```mermaid
-flowchart LR
-    MIC["Browser mic<br/>16 kHz PCM"] -->|one WebSocket| BRIDGE["Voice bridge<br/>floor control · latency · persistence"]
-    BRIDGE -->|Natural| LIVE["Gemini Live<br/>speech in → speech out"]
-    BRIDGE -->|Checked| FLUX["Deepgram Flux<br/>STT + end-of-turn"]
-    FLUX --> ENGINE["Companion engine<br/>safety · memory · technique RAG"]
-    ENGINE --> LLM["Groq LLM stream"]
-    LLM --> GUARD["Sentence guardrail"]
-    GUARD --> TTS["Deepgram Aura-2<br/>streaming TTS"]
-    LIVE -. transcripts .-> SAFETY["Safety screen<br/>crisis override"]
-    LIVE --> OUT
-    TTS --> OUT["24 kHz PCM stream<br/>gapless playback"]
-    SAFETY -. mutes model, speaks script .-> OUT
-    BRIDGE -.-> DB[("Postgres<br/>turns · memories · evals")]
-```
+<img src="docs/images/flow.png" alt="Haven architecture diagram showing browser, voice bridge, Natural and Checked voice engines, and shared brain services" width="820" />
 
 ---
 
@@ -69,6 +55,8 @@ Each of these exists because a measurement said it should.
 **No lost words on a pause.** If the turn closes on a breath ("Honestly, …") and you keep going before any reply is audible, the half-sentence is carried into your next turn instead of being answered on its own.
 
 **An interruption judge, not a voice detector.** Plain voice-activity barge-in stops for every cough, every "mm-hmm", and Haven's own voice leaking from laptop speakers. While Haven speaks, a Flux side channel keeps transcribing the mic and a small judge decides what was meant. A backchannel ("mm-hmm", "yeah", "genau") lets Haven keep talking. Words that match what Haven just said are treated as echo and ignored. A stop phrase ("wait", "sorry", "warte") or three or more real words stops it. In Natural mode, Gemini hears silence while it speaks, and on a real interruption it is handed the buffered audio, so your first words aren't lost. Measured with real speech: "mm-hmm" ignored, "wait, sorry…" stops Haven **0.84–0.97 s** after you start talking. Inspired by [Cue](https://github.com/ioteverythin/cue), whose weights aren't public.
+
+<img src="docs/images/bargein.png" alt="Decision flow for the interruption judge: echo filtering, backchannel filtering, stop phrases, and word thresholds" width="820" />
 
 **Barge-in that respects what you heard.** Only the sentences actually delivered are written to history, so the model's memory of the conversation matches yours. Every reply carries a turn id, so a stale "finished playing" event can never reopen the mic in the middle of the next turn.
 

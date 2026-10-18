@@ -33,7 +33,7 @@ Haven runs two complete real-time voice architectures behind the same WebSocket,
 |---|---|---|
 | How it works | Native speech-to-speech: one model hears and speaks | Streaming STT → LLM → per-sentence TTS |
 | Stack | Gemini 3.1 Flash Live | Deepgram Flux → Groq `gpt-oss-120b` → Deepgram Aura-2 |
-| Turn-taking | Gemini's built-in activity detection | Flux semantic end-of-turn + speculative replies |
+| Turn-taking | Gemini activity detection + interruption judge | Flux semantic end-of-turn + speculative replies + interruption judge |
 | First audio after you stop speaking* | **1.6–1.7 s** | **1.8–1.9 s** |
 | Safety | Live transcripts screened; model muted and overridden on risk | Every sentence screened *before* it is spoken |
 | Best at | Prosody, tone, feeling human | Control, auditability, guarantees |
@@ -68,7 +68,9 @@ Each of these exists because a measurement said it should.
 
 **No lost words on a pause.** If the turn closes on a breath ("Honestly, …") and you keep going before any reply is audible, the half-sentence is carried into your next turn instead of being answered on its own.
 
-**Barge-in that respects what you heard.** Talk over Haven and the reply is cancelled mid-sentence. Only the sentences actually delivered are written to history, so the model's memory of the conversation matches yours. Every reply carries a turn id, so a stale "finished playing" event can never reopen the mic in the middle of the next turn.
+**An interruption judge, not a voice detector.** Plain voice-activity barge-in stops for every cough, every "mm-hmm", and Haven's own voice leaking from laptop speakers. While Haven speaks, a Flux side channel keeps transcribing the mic and a small judge decides what was meant. A backchannel ("mm-hmm", "yeah", "genau") lets Haven keep talking. Words that match what Haven just said are treated as echo and ignored. A stop phrase ("wait", "sorry", "warte") or three or more real words stops it. In Natural mode, Gemini hears silence while it speaks, and on a real interruption it is handed the buffered audio, so your first words aren't lost. Measured with real speech: "mm-hmm" ignored, "wait, sorry…" stops Haven **0.84–0.97 s** after you start talking. Inspired by [Cue](https://github.com/ioteverythin/cue), whose weights aren't public.
+
+**Barge-in that respects what you heard.** Only the sentences actually delivered are written to history, so the model's memory of the conversation matches yours. Every reply carries a turn id, so a stale "finished playing" event can never reopen the mic in the middle of the next turn.
 
 **A deterministic crisis path.** Crisis language never reaches the LLM in Checked mode. A fixed response with helplines is spoken, and it plays from cache in about 0.85 s. In Natural mode, the model's live transcripts are screened as they arrive: on risk, the model is muted for the rest of its turn, the client flushes its audio, and the same script is spoken in a separate voice.
 
@@ -78,10 +80,14 @@ Each of these exists because a measurement said it should.
 
 ## What else is inside
 
+- **Wins you'd otherwise skip past.** Many high achievers stop feeling their wins: target hit, deal closed, nothing. Haven notices achievements you mention, even ones you brush off, keeps them, and brings them back when it fits. They're all on the Journey page.
+- **A takeaway when you hang up.** One sentence on what you talked through, how your mood moved ("came in drained, leaving lighter"), and one small step you can take by tomorrow.
+- **It follows up.** Come back and Haven opens with what you were facing ("How did the pitch go?"), not a generic hello.
+- **English and German.** Both engines, with German crisis detection and German helplines (TelefonSeelsorge, 112). For German, Natural mode is recommended; Checked mode's multilingual recognizer occasionally mishears words, so it's marked beta.
 - **Long-term memory.** After each turn, an LLM extracts at most two durable facts ("has a job interview Friday", "breathing exercises helped"). They shape future conversations and are fully visible and erasable on the Memory page.
 - **Technique knowledge base.** 15 evidence-based techniques (CBT reframing, ACT defusion, box breathing, 5-4-3-2-1 grounding, sleep wind-down, behavioural activation and more), offered one step at a time and only when the person seems open to it.
 - **Two-sided safety.** Input is screened into three tiers (none, elevated, crisis), with negation handling ("I'd never hurt myself" is elevated, not crisis). Output is screened so the model never diagnoses, never doses medication, and never claims to be a clinician.
-- **Evaluation loop.** Every turn is stored with its latency breakdown and risk tier. An LLM judge scores replies on empathy, safety, helpfulness and how they sound spoken aloud. The weakest production turns are promoted into a regression suite (`14/14` passing), which gates prompt changes.
+- **Evaluation loop.** Every turn is stored with its latency breakdown and risk tier. An LLM judge scores replies on empathy, safety, helpfulness and how they sound spoken aloud. The weakest production turns are promoted into a regression suite (`17/17` passing, in English and German), which gates prompt changes.
 - **Live insights.** The [Insights page](https://haven-frontend-w8bx.onrender.com/insights) shows response-time percentiles per engine, safety-tier counts and judge scores, all computed from stored turns.
 - **Text fallback.** Same engine over REST for when you can't talk out loud.
 
@@ -128,10 +134,10 @@ Open http://localhost:3000, go to **Talk**, and tap the light.
 
 ```bash
 cd backend
-uv run pytest                                  # 44 tests, no network: both engines with fake providers
+uv run pytest                                  # 78 tests, no network: both engines, the interruption judge, safety
 uv run ruff check app tests scripts && uv run pyright app scripts
-uv run python -m scripts.evaluate cases        # 14 red-team and behaviour cases against the live LLM
-python ../tools/e2e_voice_test.py              # real speech through both engines, end to end
+uv run python -m scripts.evaluate cases        # 17 red-team and behaviour cases against the live LLM
+python ../tools/e2e_voice_test.py en de        # real speech: both engines, both languages, barge-in, takeaway
 ```
 
 ## Deploy
@@ -144,11 +150,12 @@ To check a deployment: `/health` shows provider and database status, `/api/v1/vo
 
 ```
 backend/app/
-  voice/        bridge.py (shared protocol, streaming TTS), live_session.py, pipeline_session.py, deepgram.py
-  services/     companion engine, safety, knowledge (RAG), memory, LLM gateway, prompts
-  api/          voice WebSocket, chat, memory, insights, diagnostics
+  voice/        bridge.py (shared protocol, streaming TTS), barge.py (interruption judge),
+                live_session.py, pipeline_session.py, deepgram.py
+  services/     companion engine, safety (EN/DE), knowledge (RAG), memory + wins, takeaway, LLM gateway
+  api/          voice WebSocket, chat, memory, journey, insights, diagnostics
 backend/scripts/evaluate.py   LLM judge + regression suite
-frontend/app/                 landing, talk, memory, insights
+frontend/app/                 landing, talk, journey, memory, insights
 tools/e2e_voice_test.py       browser-equivalent voice test for both engines
 ```
 
@@ -157,7 +164,7 @@ tools/e2e_voice_test.py       browser-equivalent voice test for both engines
 - **Under one second.** Tuned activity detection in Natural mode, and a regional deployment closer to users.
 - **A learned risk classifier** running alongside the deterministic screen, trained on judged and clinician-reviewed turns.
 - **Identity.** JWT verification on REST and the WebSocket handshake. The backend currently trusts the client's user id.
-- **Echo handling.** Server-side echo cancellation so barge-in works on laptop speakers, not just headphones.
+- **Acoustic interruption model.** Swap the transcript-based judge for an acoustic one (like Cue) once weights are available, to react before the first word is transcribed.
 - **Clinical review** of the technique wording and the crisis script before any real-world use.
 
 <div align="center">

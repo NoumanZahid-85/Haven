@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.core.config import get_settings
 from app.db.models import Base
 from app.db.session import get_engine
 from app.services import knowledge
@@ -51,11 +50,11 @@ async def _warm_llm() -> None:
 
 
 def warm_up() -> None:
-    """Embed the knowledge base, warm the LLM, and pre-synthesize fixed
-    phrases in the background — the server accepts traffic immediately."""
-    from app.voice.ws_session import prewarm_tts
+    """Embed the knowledge base, warm the LLM, and open the Deepgram TTS
+    connection in the background — the server accepts traffic immediately."""
+    from app.voice import deepgram
 
-    for coro in (knowledge.warm_knowledge(), _warm_llm(), prewarm_tts(get_settings().groq_api_key)):
+    for coro in (knowledge.warm_knowledge(), _warm_llm(), deepgram.warm()):
         task = asyncio.create_task(coro)
         _warm_tasks.add(task)
         task.add_done_callback(_warm_tasks.discard)

@@ -37,9 +37,10 @@ async def health_check(
         logger.error("PostgreSQL health check failed: %s", exc)
 
     return HealthResponse(
-        status="ok" if db_status == "connected" and settings.groq_api_key else "degraded",
+        status="ok" if db_status == "connected" and settings.gemini_api_key and settings.deepgram_api_key else "degraded",
         db=db_status,
         redis="configured" if get_redis() is not None else "disabled",
-        voice="configured" if settings.groq_api_key else "missing GROQ_API_KEY",
+        live="configured" if settings.gemini_api_key else "missing GEMINI_API_KEY",
+        pipeline="configured" if settings.deepgram_api_key and settings.groq_api_key else "missing DEEPGRAM_API_KEY or GROQ_API_KEY",
         knowledge="embedded" if knowledge.is_embedded() else "tag-fallback",
     )

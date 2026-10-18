@@ -21,7 +21,8 @@ from app.db.session import get_db
 
 router = APIRouter(prefix="/api/v1", tags=["insights"])
 
-WINDOW = 1000  # latency stats over the most recent N voice turns
+WINDOW = 1000  # latency stats over the most recent N turns per voice mode
+VOICE_MODES = ("live", "pipeline")
 
 
 def _pcts(values: list[float]) -> dict[str, float | None]:
@@ -45,15 +46,21 @@ async def insights(db: AsyncSession = Depends(get_db)) -> dict:
     turns_24h = await db.scalar(select(func.count(Turn.id)).where(Turn.created_at >= since))
     risk_rows = (await db.execute(select(Turn.risk, func.count(Turn.id)).group_by(Turn.risk))).all()
 
-    recent = (await db.execute(
-        select(Turn.stt_ms, Turn.llm_first_token_ms, Turn.first_audio_ms, Turn.total_ms)
-        .where(Turn.channel == "voice", Turn.interrupted == 0)
-        .order_by(Turn.created_at.desc())
-        .limit(WINDOW)
-    )).all()
-
-    def col(i: int) -> list[float]:
-        return [r[i] for r in recent if r[i] is not None]
+    latency: dict[str, dict] = {}
+    for mode in VOICE_MODES:
+        recent = (await db.execute(
+            select(Turn.stt_ms, Turn.llm_first_token_ms, Turn.first_audio_ms, Turn.total_ms)
+            .where(Turn.channel == mode, Turn.interrupted == 0)
+            .order_by(Turn.created_at.desc())
+            .limit(WINDOW)
+        )).all()
+        cols = [[r[i] for r in recent if r[i] is not None] for i in range(4)]
+        latency[mode] = {
+            "end_of_turn": _pcts(cols[0]),
+            "llm_first_token": _pcts(cols[1]),
+            "first_audio": _pcts(cols[2]),
+            "full_turn": _pcts(cols[3]),
+        }
 
     evals = (await db.execute(
         select(
@@ -78,12 +85,7 @@ async def insights(db: AsyncSession = Depends(get_db)) -> dict:
             "barge_ins": int(totals[3] or 0),
         },
         "safety": {risk: count for risk, count in risk_rows},
-        "latency_ms": {
-            "stt": _pcts(col(0)),
-            "llm_first_token": _pcts(col(1)),
-            "first_audio": _pcts(col(2)),
-            "full_turn": _pcts(col(3)),
-        },
+        "latency_ms": latency,
         "quality": {
             "evaluated_turns": evals[0],
             "overall": avg(evals[1]),

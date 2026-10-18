@@ -9,5 +9,6 @@ class HealthResponse(BaseModel):
     status: str
     db: str
     redis: str
-    voice: str
+    live: str
+    pipeline: str
     knowledge: str

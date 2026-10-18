@@ -33,11 +33,17 @@ class Settings(BaseSettings):
     redis_url: str = ""  # short-term conversation window; optional
 
     # ── Model providers ─────────────────────────────────────────────
-    groq_api_key: str = ""  # STT (Whisper), TTS (Orpheus), primary LLM
-    gemini_api_key: str = ""  # fallback LLM + embeddings for technique retrieval
+    gemini_api_key: str = ""  # Live mode (speech-to-speech), fallback LLM, embeddings
+    deepgram_api_key: str = ""  # Pipeline mode: Flux STT + Aura-2 streaming TTS
+    groq_api_key: str = ""  # Pipeline-mode + text-chat LLM
     openai_api_key: str = ""
     openai_base_url: str = ""
     openai_model_name: str = ""
+
+    # ── Voice ───────────────────────────────────────────────────────
+    live_model: str = "gemini-3.1-flash-live-preview"
+    live_voice: str = "Aoede"
+    tts_voice: str = "aura-2-thalia-en"
 
     # ── Conversation ────────────────────────────────────────────────
     memory_turns: int = 10  # short-term window kept per session

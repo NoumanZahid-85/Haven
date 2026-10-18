@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 
-# Set test environment variables BEFORE importing app modules
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///test.db")
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
+# Set BEFORE importing app modules: a throwaway SQLite DB and no provider keys,
+# so the suite never touches real infrastructure or makes network calls.
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///test.db"
+for key in ("REDIS_URL", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+    os.environ[key] = ""
 os.environ.setdefault("DEBUG", "false")

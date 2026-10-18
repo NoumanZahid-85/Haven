@@ -7,7 +7,7 @@ dependencies = [
     "asyncpg>=0.31.0",
     "fastapi[standard]>=0.141.1",
     "greenlet>=3.5.5",
-    "groq>=0.30.0",
+    "google-genai>=1.40.0",
     "gunicorn>=21.0.0",
     "httpx>=0.28.1",
     "litellm>=1.40.0",
@@ -17,9 +17,7 @@ dependencies = [
     "redis>=5.0.0",
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn[standard]>=0.52.1",
-    # Silero VAD only (bundled ONNX model). No Daily/WebRTC transport — the
-    # voice path is a plain WebSocket — so this now installs on Windows too.
-    "pipecat-ai[silero]>=0.0.50",
+    "websockets>=13.0",
 ]
 
 [dependency-groups]

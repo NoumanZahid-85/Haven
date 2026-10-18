@@ -11,13 +11,9 @@ RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
 FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-# C++ runtime for onnxruntime (Silero VAD). The old WebRTC stack also needed
-# libGL/glib/ffmpeg for daily-python; the plain-WebSocket transport doesn't.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && adduser --disabled-password --no-create-home --gecos "" appuser
+# Pure-Python voice stack (WebSocket relays to Gemini Live / Deepgram):
+# no native audio libraries needed.
+RUN adduser --disabled-password --no-create-home --gecos "" appuser
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin

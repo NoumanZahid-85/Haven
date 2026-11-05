@@ -71,6 +71,39 @@ def test_german_distress_is_elevated(text):
     assert screen_input(text) is Risk.ELEVATED
 
 
+@pytest.mark.parametrize("text", [
+    "I wanna die",
+    "I don't wanna live anymore",
+    "I don't wanna be alive anymore",
+    "Honestly, I don't wanna wake up tomorrow.",
+    "I don’t want to live anymore",  # speech-to-text can write a curly apostrophe
+    "I do not want to live anymore",
+    "I'm gonna kill myself",
+])
+def test_spoken_forms_are_caught(text):
+    assert screen_input(text) is Risk.CRISIS
+
+
+@pytest.mark.parametrize("text", [
+    "I'm not okay and I want to die",
+    "I'm not okay and I don't want to live anymore",
+    "I can't sleep, I'm not fine, but I want to kill myself",
+    "Ich kann nicht schlafen und ich will sterben",
+])
+def test_negation_does_not_cross_a_clause(text):
+    assert screen_input(text) is Risk.CRISIS
+
+
+@pytest.mark.parametrize("text", ["I'm not gonna kill myself", "I would never wanna hurt myself"])
+def test_negated_spoken_forms_stay_elevated(text):
+    assert screen_input(text) is Risk.ELEVATED
+
+
+@pytest.mark.parametrize("text", ["I wanna sleep", "I don't wanna go to work tomorrow", "I'm gonna be late", "my wannabe boss"])
+def test_spoken_forms_alone_are_not_flagged(text):
+    assert screen_input(text) is Risk.NONE
+
+
 def test_german_output_guardrail_uses_german_line():
     safe, replaced = screen_output("Du hast wahrscheinlich eine Depression.", "de")
     assert replaced and "Ärztin" in safe

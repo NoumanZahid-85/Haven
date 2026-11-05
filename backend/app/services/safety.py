@@ -38,12 +38,12 @@ _CRISIS_PATTERNS = [
     r"\bend(ing)? (my|it) (life|all)\b",
     r"\bend it all\b",
     r"\bsuicid",
-    r"\b(want|wanna|going) to die\b",
+    r"\b(want|going) to die\b",
     r"\bwish i (was|were) dead\b",
     r"\bbetter off dead\b",
     r"\bbetter off (without me|if i (was|were) (dead|gone))\b",
     r"\bif i (was|were) dead\b",
-    r"\bdon'?t want to (be alive|live|exist|wake up)\b",
+    r"\b(don'?t|do not) want to (be alive|live|exist|wake up)\b",
     r"\bno reason to (live|go on|be here)\b",
     r"\b(hurt|harm|cut|cutting) my ?self\b",
     r"\bself[- ]?harm",
@@ -87,15 +87,26 @@ _ELEVATED_PATTERNS = [
     r"\b(keiner|niemand) würde mich vermissen\b",
 ]
 
-_NEGATION = re.compile(r"\b(not|never|n'?t|no longer|wouldn'?t|won'?t|nie|niemals|nicht|kein)\b[\w\s']{0,20}$")
+# A clause break ends the negation: "I'm not okay and I want to die" negates nothing.
+_NEGATION = re.compile(
+    r"\b(not|never|n'?t|no longer|wouldn'?t|won'?t|nie|niemals|nicht|kein)\b"
+    r"(?:(?!\b(?:and|but|so|because|und|aber|weil)\b)[\w\s']){0,20}$"
+)
 
 _CRISIS_RE = [re.compile(p, re.IGNORECASE) for p in _CRISIS_PATTERNS]
 _ELEVATED_RE = [re.compile(p, re.IGNORECASE) for p in _ELEVATED_PATTERNS]
 
 
+def _normalize(text: str) -> str:
+    """Speech-to-text writes "wanna", "gonna" and curly apostrophes; the patterns use full forms."""
+    lowered = text.lower().replace("’", "'")
+    lowered = re.sub(r"\bwanna\b", "want to", lowered)
+    return re.sub(r"\bgonna\b", "going to", lowered)
+
+
 def screen_input(text: str) -> Risk:
     """Classify a user utterance into a risk tier."""
-    lowered = text.lower()
+    lowered = _normalize(text)
     for pattern in _CRISIS_RE:
         match = pattern.search(lowered)
         if match is None:

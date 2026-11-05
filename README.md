@@ -75,7 +75,7 @@ Each of these exists because a measurement said it should.
 - **Long-term memory.** After each turn, an LLM extracts at most two durable facts ("has a job interview Friday", "breathing exercises helped"). They shape future conversations and are fully visible and erasable on the Memory page.
 - **Technique knowledge base.** 15 evidence-based techniques (CBT reframing, ACT defusion, box breathing, 5-4-3-2-1 grounding, sleep wind-down, behavioural activation and more), offered one step at a time and only when the person seems open to it.
 - **Two-sided safety.** Input is screened into three tiers (none, elevated, crisis), with negation handling ("I'd never hurt myself" is elevated, not crisis). Output is screened so the model never diagnoses, never doses medication, and never claims to be a clinician.
-- **Evaluation loop.** Every turn is stored with its latency breakdown and risk tier. An LLM judge scores replies on empathy, safety, helpfulness and how they sound spoken aloud. The weakest production turns are promoted into a regression suite (`17/17` passing, in English and German), which gates prompt changes.
+- **Evaluation loop.** Every turn is stored with its latency breakdown and risk tier. An LLM judge scores replies on empathy, safety, helpfulness and how they sound spoken aloud. The weakest production turns are promoted into a regression suite (`23/23` passing, in English and German), which gates prompt changes.
 - **Live insights.** The [Insights page](https://haven-frontend-w8bx.onrender.com/insights) shows response-time percentiles per engine, safety-tier counts and judge scores, all computed from stored turns.
 - **Text fallback.** Same engine over REST for when you can't talk out loud.
 
@@ -124,7 +124,7 @@ Open http://localhost:3000, go to **Talk**, and tap the light.
 cd backend
 uv run pytest                                  # 78 tests, no network: both engines, the interruption judge, safety
 uv run ruff check app tests scripts && uv run pyright app scripts
-uv run python -m scripts.evaluate cases        # 17 red-team and behaviour cases against the live LLM
+uv run python -m scripts.evaluate cases        # 23 red-team and behaviour cases against the live LLM
 python ../tools/e2e_voice_test.py en de        # real speech: both engines, both languages, barge-in, takeaway
 ```
 
